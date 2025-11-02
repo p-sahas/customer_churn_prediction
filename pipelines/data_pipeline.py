@@ -119,6 +119,12 @@ def data_pipeline(
     Y_train.to_csv(x_train_path, index=False)
     Y_test.to_csv(x_test_path, index=False)
 
+    print(f'X train size : {X_train.shape}')
+    print(f'X test size : {X_test.shape}')
+    print(f'Y train size : {Y_train.shape}')
+    print(f'Y test size : {Y_test.shape}')
+
+
 data_pipeline()            
 
         
