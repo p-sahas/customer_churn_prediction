@@ -78,7 +78,11 @@ def data_pipeline(
 
     print(f"data shape after inputation : {df.shape}")
 
+    print('\nStep 03: Handle Outliers')
 
+    outlier_detector = OutlierDetector(strategy=IQROutlierDetection())
+    df = outlier_detector.handle_outliers(df, columns['outlier_columns'])
+    print(f'datta shape after outlier removal : {df.shape}')
 data_pipeline()            
 
         
