@@ -50,7 +50,8 @@ def data_pipeline(
         X_test = pd.read_csv(x_test_path)
         Y_train = pd.read_csv(y_train_path)
         Y_test = pd.read_csv(y_test_path) 
-    os.makedirs(data_paths[''])
+
+    os.makedirs(data_paths['data_artifacts_dir'], exist_ok=True)
     if not os.path.exists('temp_imputed.csv'):
         ingestor = DataIngestorCSV()
         df = ingestor.ingest(data_path)
