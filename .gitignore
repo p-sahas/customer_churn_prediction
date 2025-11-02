@@ -26,8 +26,7 @@ MANIFEST
 *.manifest
 *.spec
 
-training_pipeline.py
-streaming_inference_pipeline.py
+
 model_training.py
 model_inference.py
 model_evaluation.py
