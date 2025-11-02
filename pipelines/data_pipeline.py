@@ -96,6 +96,10 @@ def data_pipeline(
     nominal_strategy = NominalEncodingStrategy(encoding_config['nominal_columns'])
     ordinal_strategy = OrdinalEncodingStratergy(encoding_config['ordinal_mappings'])
 
+    df = nominal_strategy.encode(df)
+    df = ordinal_strategy.encode(df)
+    print(f"data after feature encoding : \n{df.head()}")
+    
 
 data_pipeline()            
 
