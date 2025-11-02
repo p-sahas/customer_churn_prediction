@@ -50,7 +50,7 @@ def data_pipeline(
         X_test = pd.read_csv(x_test_path)
         Y_train = pd.read_csv(y_train_path)
         Y_test = pd.read_csv(y_test_path) 
-
+    os.makedirs(data_paths[''])
     if not os.path.exists('temp_imputed.csv'):
         ingestor = DataIngestorCSV()
         df = ingestor.ingest(data_path)
@@ -109,7 +109,14 @@ def data_pipeline(
     df = df.drop(columns=['RowNumber', 'CustomerId', 'Firstname', 'Lastname'])
     print(f'data after post processing : \n {df.head()}')
 
-    
+    print('\nStep 08 : Data Splitting')
+    splitting_stratergy = SimpleTrainTestSplitStratergy(test_size=splitting_config['test_size'])
+    X_train, X_test, Y_train, Y_test = splitting_stratergy.split_data(df, 'Exited')
+
+    X_train.to_csv(x_train_path, index=False)
+    X_test.to_csv(x_test_path, index=False)
+    Y_train.to_csv(x_train_path, index=False)
+    Y_test.to_csv(x_test_path, index=False)
 
 data_pipeline()            
 
