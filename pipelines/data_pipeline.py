@@ -91,6 +91,11 @@ def data_pipeline(
     df = binning.bin_feature(df, 'CreditScore')
     print(f"data after feature binning : \n{df.head()}")
 
+    print('\nStep 05 : Feature Encoding')
+
+    nominal_strategy = NominalEncodingStrategy(encoding_config['nominal_columns'])
+    ordinal_strategy = OrdinalEncodingStratergy(encoding_config['ordinal_mappings'])
+
 
 data_pipeline()            
 
