@@ -9,7 +9,7 @@ import seaborn as sns
 import json
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))
 from data_ingestion import DataIngestorCSV
-from handle_missing_values import DropMissingValuesStrategy, FillMissingValuesStratergy, GenderImputer
+from handle_missing_values import DropMissingValuesStrategy, FillMissingValuesStrategy, GenderImputer
 from outlier_detection import OutlierDetector, IQROutlierDetection
 from feature_binning import CustomBinningStratergy
 from feature_encoding import OrdinalEncodingStratergy, NominalEncodingStrategy
@@ -51,11 +51,34 @@ def data_pipeline(
         Y_train = pd.read_csv(y_train_path)
         Y_test = pd.read_csv(y_test_path) 
 
-    ingestor = DataIngestorCSV()
-    df = ingestor.ingest(data_path)
-    print(f"loaded data shape : {df.shape}")
+    if not os.path.exists('temp_imputed.csv'):
+        ingestor = DataIngestorCSV()
+        df = ingestor.ingest(data_path)
+        print(f"loaded data shape : {df.shape}")
 
-    print('Step 02 : Handle Missing Values')
+        print('\nStep 02 : Handle Missing Values')
+        drop_handler = DropMissingValuesStrategy(critical_columns=columns['critical_columns'])
+
+        age_handler = FillMissingValuesStrategy(
+                                                method='mean',
+                                                relevent_column='Age'
+                                                )
+        
+        gender_handler = FillMissingValuesStrategy(
+                                                    relevent_column=None,
+                                                    is_custom_imputer=True,
+                                                    custom_imputer=GenderImputer()                                                                                      
+                                                    )
+        df = drop_handler.handle(df)
+        df = age_handler.handle(df)
+        df = gender_handler.handle(df)
+        df.to_csv('temp_imputed.csv')
+
+    df = pd.read_csv('temp_imputed.csv')
+
+    print(f"data shape after inputation : {df.shape}")
+
+
 data_pipeline()            
 
         

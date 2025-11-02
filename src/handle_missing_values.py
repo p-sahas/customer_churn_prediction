@@ -20,14 +20,13 @@ class MissingValueHandlingStrategy(ABC):
 class DropMissingValuesStrategy(MissingValueHandlingStrategy):
     def __init__(self, critical_columns=[]):
         self.critical_columns = critical_columns
-        logging.info(
-            f"Dropping rows with missing values in critical columns : {self.critical_columns}")
+        logging.info(f"Dropping rows with missing values in critical columns : {self.critical_columns}")
 
     def handle(self, df):
         df_cleaned = df.dropna(subset=self.critical_columns)
         n_dropped = len(df) - len(df_cleaned)
         logging.info(f"{n_dropped} has been dropped")
-
+        return df_cleaned
 
 class Gender(str, Enum):
     MALE = 'Male'
@@ -44,7 +43,7 @@ class GenderImputer:
     def __init__(self):
         self.groq_client = groq.Groq()
 
-    def _predict_gender(self, first_name, last_name):
+    def _predict_gender(self, firstname, lastname):
         prompt = f"""
                 What is the most likely gender (Male or Female) for someone with the first name '{firstname}'
                 and last name '{lastname}' ?
@@ -57,19 +56,17 @@ class GenderImputer:
             messages=[{
                 "role": "user", "content": prompt}],
         )
-        predicted_gender = response.choices[0].message.contentt.strip()
-        prediction = GenderPrediction(
-            firstname=firstname, lastname=lastname, pred_gender=predicted_gender)
-        logging.info(
-            f"Predicted gender for {firstname} {lastname}: {predicted_gender}")
-        return prediction.predict_gender
+        predicted_gender = response.choices[0].message.content.strip()
+        prediction = GenderPrediction(firstname=firstname, lastname=lastname, pred_gender=predicted_gender)
+        logging.info( f"Predicted gender for {firstname} {lastname}: {predicted_gender}")
+        return prediction.pred_gender
 
     def impute(self, df):
         missing_gender_index = df['Gender'].isnull()
         for idx in df[missing_gender_index].index:
             first_name = df.loc[idx, 'Firstname']
             last_name = df.loc[idx, 'Lastname']
-            gender = self.predict_gender(first_name, last_name)
+            gender = self._predict_gender(first_name, last_name)
 
             if gender:
                 df.loc[idx, 'Gender'] = gender
@@ -79,7 +76,7 @@ class GenderImputer:
         
         return df
 
-class FillMissingValuesStratergy(MissingValueHandlingStrategy):
+class FillMissingValuesStrategy(MissingValueHandlingStrategy):
     """
     Missing -> Mean (Age)
             -> Custom (Gender)
