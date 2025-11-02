@@ -1,0 +1,111 @@
+# ==========================================
+# Python
+# ==========================================
+__pycache__/
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+*.manifest
+*.spec
+
+
+model_training.py
+model_inference.py
+model_evaluation.py
+model_building.py
+
+# ==========================================
+# Virtual Environments
+# ==========================================
+venv/
+ENV/
+env/
+.venv/
+.ENV/
+.env/
+.env
+env.bak/
+venv.bak/
+pyvenv.cfg
+
+# ==========================================
+# Jupyter Notebook
+# ==========================================
+.ipynb_checkpoints
+*/.ipynb_checkpoints/*
+*.ipynb_checkpoints
+
+# ==========================================
+# IDEs
+# ==========================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+.AppleDouble
+.LSOverride
+*.sublime-project
+*.sublime-workspace
+.project
+.pydevproject
+.settings/
+.metadata
+.recommenders/
+
+# ==========================================
+# Environment Variables & Secrets
+# ==========================================
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+credentials.json
+secrets.yaml
+secrets.yml
+
+# ==========================================
+# ML Artifacts & Data
+# ==========================================
+artifacts/
+models/
+*.pkl
+*.joblib
+*.h5
+*.hdf5
+*.pt
+*.pth
+*.ckpt
+*.model
+
+
+# Data directories (keep structure, ignore files)
+data/*
+!data/.gitkeep
+!data/raw/.gitkeep
+data/raw/*.csv
+data/processed/*
+data/interim/*
+data/external/*
+
+
