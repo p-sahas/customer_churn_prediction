@@ -100,6 +100,10 @@ def data_pipeline(
     df = ordinal_strategy.encode(df)
     print(f"data after feature encoding : \n{df.head()}")
     
+    print('\nStep 05 : Feature Scaling')
+    minmax_strategy = MinMaxScalingStratergy()
+    df = minmax_strategy.scale(df, scaling_config['columns_to_scale'])
+    print(f"data after feature scaling : \n{df.head()}")
 
 data_pipeline()            
 
