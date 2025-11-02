@@ -83,6 +83,15 @@ def data_pipeline(
     outlier_detector = OutlierDetector(strategy=IQROutlierDetection())
     df = outlier_detector.handle_outliers(df, columns['outlier_columns'])
     print(f'data shape after outlier removal : {df.shape}')
+
+
+    print('\nStep 04 : Feature Bining')
+
+    binning = CustomBinningStratergy(binning_config['credit_score_bins'])
+    df = binning.bin_feature(df, 'CreditScore')
+    print(f"data after feature binnind : \n{df.head()}")
+
+
 data_pipeline()            
 
         
