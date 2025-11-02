@@ -72,7 +72,7 @@ def data_pipeline(
         df = drop_handler.handle(df)
         df = age_handler.handle(df)
         df = gender_handler.handle(df)
-        df.to_csv('temp_imputed.csv')
+        df.to_csv('temp_imputed.csv', index=False)
 
     df = pd.read_csv('temp_imputed.csv')
 
@@ -89,7 +89,7 @@ def data_pipeline(
 
     binning = CustomBinningStratergy(binning_config['credit_score_bins'])
     df = binning.bin_feature(df, 'CreditScore')
-    print(f"data after feature binnind : \n{df.head()}")
+    print(f"data after feature binning : \n{df.head()}")
 
 
 data_pipeline()            
