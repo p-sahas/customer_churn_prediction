@@ -27,7 +27,7 @@ MANIFEST
 *.spec
 
 
-model_training.py
+
 model_inference.py
 model_evaluation.py
 
