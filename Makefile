@@ -2,7 +2,7 @@
 
 # Default Python interpreter
 PYTHON = python
-VENV = .venv/bin/activate
+VENV = .venv/Scripts/activate
 MLFLOW_PORT ?= 5001
 
 # Default target
@@ -28,7 +28,7 @@ install:
 	@source .venv/bin/activate && pip install -r requirements.txt
 	@echo "Installation completed successfully!"
 	@echo "To activate the virtual environment, run: source .venv/bin/activate"
-
+#.venv\Scripts\activate
 # Clean up
 clean:
 	@echo "Cleaning up artifacts..."
