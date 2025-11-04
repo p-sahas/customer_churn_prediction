@@ -30,7 +30,7 @@ MANIFEST
 model_training.py
 model_inference.py
 model_evaluation.py
-model_building.py
+
 
 # ==========================================
 # Virtual Environments
