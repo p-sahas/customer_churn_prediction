@@ -22,7 +22,7 @@ class ModelTrainer:
         return model, train_score
     
     def save_model(self, model, filepath):
-        joblib.dump(filepath)
+        joblib.dump(model, filepath)
 
     def load_model(self, filepath):
         return joblib.load(filepath) 
