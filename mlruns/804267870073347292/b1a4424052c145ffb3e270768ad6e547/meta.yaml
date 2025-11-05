@@ -1,0 +1,15 @@
+artifact_uri: file:D:/Courses/_Zuu Crew/Build Production-Ready Machine Learning Systems
+  - Zuu Crew/_Programming/Week 05-06/mlruns/804267870073347292/b1a4424052c145ffb3e270768ad6e547/artifacts
+end_time: 1762357060567
+entry_point_name: ''
+experiment_id: '804267870073347292'
+lifecycle_stage: active
+run_id: b1a4424052c145ffb3e270768ad6e547
+run_name: training pipeliine | 2025-11-05 21:07:32
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1762357053104
+status: 3
+tags: []
+user_id: Sahas Induwara

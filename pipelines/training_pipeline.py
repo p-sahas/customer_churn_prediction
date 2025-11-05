@@ -40,7 +40,7 @@ def training_pipeline(
         print("Loading Data Artifacts from Data Pipeline...")
     
     mlflow_tracker = MLflowTracker()
-    # setup_mlflow_autolog()
+    setup_mlflow_autolog()
     run_tags = create_mlflow_run_tags(
                                     'training_pipeline', {
                                         'model_type' : 'XGboost',
