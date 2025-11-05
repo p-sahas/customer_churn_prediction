@@ -28,7 +28,7 @@ install:
 	@source .venv/bin/activate && pip install -r requirements.txt
 	@echo "Installation completed successfully!"
 	@echo "To activate the virtual environment, run: source .venv/bin/activate"
-#.venv\Scripts\activate
+#.venv/Scripts/activate
 # Clean up
 clean:
 	@echo "Cleaning up artifacts..."

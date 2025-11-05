@@ -6,7 +6,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-#from data_pipeline import data_pipeline
+from data_pipeline import data_pipeline
 from typing import Dict, Any, Tuple, Optional
 import json
 from pathlib import Path
@@ -23,4 +23,20 @@ logging.basicConfig(level=logging.INFO, format=
     '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-#35.20
+def training_pipeline(
+                    data_paths: str = 'data/raw/ChurnModelling.csv',
+                    model_params: Optional[Dict[str, Any]] = None,
+                    test_size: float = 0.2, 
+                    random_state: int = 42,
+                    model_path: str = 'artifacts/models/random_forest_cv_model.joblib'
+                    ):
+    if (not os.path.exists(get_data_paths()['X_train'])) or \
+        (not os.path.exists(get_data_paths()['X_test'])) or \
+        (not os.path.exists(get_data_paths()['Y_train'])) or \
+        (not os.path.exists(get_data_paths()['Y_test'])):
+    
+        data_pipeline()
+    else:
+        print("Loading Data Artifacts from Data Pipeline...")
+
+training_pipeline()

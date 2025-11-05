@@ -114,10 +114,12 @@ def data_pipeline(
     splitting_stratergy = SimpleTrainTestSplitStratergy(test_size=splitting_config['test_size'])
     X_train, X_test, Y_train, Y_test = splitting_stratergy.split_data(df, 'Exited')
 
+    # Create directories and save splits
+    os.makedirs('artifacts/data', exist_ok=True)
     X_train.to_csv(x_train_path, index=False)
     X_test.to_csv(x_test_path, index=False)
-    Y_train.to_csv(x_train_path, index=False)
-    Y_test.to_csv(x_test_path, index=False)
+    Y_train.to_csv(y_train_path, index=False)
+    Y_test.to_csv(y_test_path, index=False)
 
     print(f'X train size : {X_train.shape}')
     print(f'X test size : {X_test.shape}')
@@ -125,7 +127,7 @@ def data_pipeline(
     print(f'Y test size : {Y_test.shape}')
 
 
-data_pipeline()            
+           
 
         
             
