@@ -62,17 +62,6 @@ def data_pipeline(
         Y_train = pd.read_csv(y_train_path)
         Y_test = pd.read_csv(y_test_path) 
 
-        mlflow_tracker.log_data_pipeline_metrics({
-                                                'total_samples' : len(X_train) + len(X_test),
-                                                'train_samples' : len(X_train),
-                                                'test_samples' : len(X_test),
-                                                'x_train_path' : x_train_path,
-                                                'x_test_path' : x_test_path,
-                                                'y_train_path' : y_train_path,
-                                                'y_test_path' : y_test_path
-                                                })
-        
-        mlflow_tracker.end_run()
 
     os.makedirs(data_paths['data_artifacts_dir'], exist_ok=True)
     if not os.path.exists('temp_imputed.csv'):
@@ -149,8 +138,19 @@ def data_pipeline(
     print(f'Y train size : {Y_train.shape}')
     print(f'Y test size : {Y_test.shape}')
 
+    mlflow_tracker.log_data_pipeline_metrics({
+                                            'total_samples' : len(X_train) + len(X_test),
+                                            'train_samples' : len(X_train),
+                                            'test_samples' : len(X_test),
+                                            'x_train_path' : x_train_path,
+                                            'x_test_path' : x_test_path,
+                                            'y_train_path' : y_train_path,
+                                            'y_test_path' : y_test_path
+                                            })
+    mlflow_tracker.end_run()
 
-data_pipeline()           
+
+# data_pipeline()           
 
         
             

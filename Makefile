@@ -1,3 +1,7 @@
+# Activate environment 'source .venv/Scripts/activate' 
+#Use Git Bash for windows
+
+
 .PHONY: all clean install train-pipeline data-pipeline streaming-inference run-all help
 
 # Default Python interpreter
