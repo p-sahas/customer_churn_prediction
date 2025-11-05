@@ -38,5 +38,26 @@ def training_pipeline(
         data_pipeline()
     else:
         print("Loading Data Artifacts from Data Pipeline...")
+    
+    X_train = pd.read_csv(get_data_paths()['X_train'])
+    Y_train = pd.read_csv(get_data_paths()['Y_train'])
+    X_test = pd.read_csv(get_data_paths()['X_test'])
+    Y_test = pd.read_csv(get_data_paths()['Y_test'])
 
-training_pipeline()
+
+    model_builder = XGboostModelBuilder(**model_params) #RandomForestModelBuilder
+    model = model_builder.build_model()
+
+    trainer = ModelTrainer()
+    model, trainer_score = trainer.train(
+                                        model=model,
+                                        X_train=X_train,
+                                        Y_train=Y_train.squeeze() # remove squeeze if u want
+                                        )
+    print(trainer_score)
+
+if __name__ == '__main__':
+    model_config = get_model_config()
+    model_params=model_config.get('model_params')
+    print(model_params)
+    training_pipeline(model_params=model_params)
