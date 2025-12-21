@@ -225,9 +225,9 @@ class ModelInference:
                 # PySpark binning would be used for batch processing
                 
                 binned_score = df['CreditScoreBins'].iloc[0]
-                logger.info(f"  ✓ CreditScore binned: {original_score} → {binned_score}")
+                logger.info(f"   CreditScore binned: {original_score} → {binned_score}")
             else:
-                logger.warning("  ⚠ CreditScore not found - skipping binning")
+                logger.warning("   CreditScore not found - skipping binning")
 
             # Apply ordinal encoding
             if 'CreditScoreBins' in df.columns:
@@ -250,9 +250,9 @@ class ModelInference:
                 # PySpark ordinal encoding would be used for batch processing
                 
                 encoded_value = df['CreditScoreBins'].iloc[0]
-                logger.info(f"  ✓ CreditScoreBins encoded: {original_value} → {encoded_value}")
+                logger.info(f"   CreditScoreBins encoded: {original_value} → {encoded_value}")
             else:
-                logger.warning("  ⚠ CreditScoreBins not found - skipping ordinal encoding")
+                logger.warning("   CreditScoreBins not found - skipping ordinal encoding")
 
             # Drop unnecessary columns
             drop_columns = ['RowNumber', 'CustomerId', 'Firstname', 'Lastname']
@@ -275,14 +275,14 @@ class ModelInference:
             available_columns = [col for col in expected_columns if col in df.columns]
             df = df[available_columns]
             
-            logger.info(f"✓ Preprocessing completed - Final shape: {df.shape}")
+            logger.info(f" Preprocessing completed - Final shape: {df.shape}")
             logger.info(f"  • Final features (reordered): {list(df.columns)}")
             logger.info(f"{'='*50}\n")
             
             return df
             
         except Exception as e:
-            logger.error(f"✗ Preprocessing failed: {str(e)}")
+            logger.error(f" Preprocessing failed: {str(e)}")
             raise
     
     def predict(self, data: Dict[str, Any]) -> Dict[str, str]:
@@ -304,11 +304,11 @@ class ModelInference:
         logger.info(f"{'='*60}")
         
         if not data:
-            logger.error("✗ Input data cannot be empty")
+            logger.error(" Input data cannot be empty")
             raise ValueError("Input data cannot be empty")
         
         if self.model is None:
-            logger.error("✗ Model not loaded")
+            logger.error(" Model not loaded")
             raise ValueError("Model not loaded")
         
         try:
@@ -332,7 +332,7 @@ class ModelInference:
                 "Confidence": f"{confidence}%"
             }
             
-            logger.info("✓ Prediction completed:")
+            logger.info(" Prediction completed:")
             logger.info(f"  • Raw Prediction: {prediction}")
             logger.info(f"  • Raw Probability: {probability:.4f}")
             logger.info(f"  • Final Status: {status}")
@@ -342,5 +342,5 @@ class ModelInference:
             return result
             
         except Exception as e:
-            logger.error(f"✗ Prediction failed: {str(e)}")
+            logger.error(f" Prediction failed: {str(e)}")
             raise
