@@ -1,0 +1,15 @@
+artifact_uri: file:///mnt/d/Courses/_Zuu Crew/Build Production-Ready Machine Learning
+  Systems - Zuu Crew/_Programming/customer_churn_prediction/mlruns/283285277163710101/a124c2b9732f4ec3b9d152da0bfeb31e/artifacts
+end_time: 1766346906400
+entry_point_name: ''
+experiment_id: '283285277163710101'
+lifecycle_stage: active
+run_id: a124c2b9732f4ec3b9d152da0bfeb31e
+run_name: data pipeline pyspark | 2025-12-22 01:24:55
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1766346896150
+status: 3
+tags: []
+user_id: sahas
