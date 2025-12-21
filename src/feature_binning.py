@@ -84,14 +84,14 @@ class CustomBinningStrategy(FeatureBinningStrategy):
     #     bin_counts = df[f'{column}Bins'].value_counts()
     #     logger.info(f"\nBinning Results:")
     #     for bin_name, count in bin_counts.items():
-    #         logger.info(f"  ✓ {bin_name}: {count} ({count/len(df)*100:.2f}%)")
+    #         logger.info(f"   {bin_name}: {count} ({count/len(df)*100:.2f}%)")
     #     
     #     invalid_count = (df[f'{column}Bins'] == "Invalid").sum()
     #     if invalid_count > 0:
-    #         logger.warning(f"  ⚠ Found {invalid_count} invalid values in column '{column}'")
+    #         logger.warning(f"   Found {invalid_count} invalid values in column '{column}'")
     #         
     #     del df[column]
-    #     logger.info(f"✓ Original column '{column}' removed, replaced with '{column}Bins'")
+    #     logger.info(f" Original column '{column}' removed, replaced with '{column}Bins'")
     #     logger.info(f"{'='*60}\n")
     #
     #     return df
