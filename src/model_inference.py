@@ -96,19 +96,19 @@ class ModelInference:
         logger.info("Loading trained model...")
         
         if not os.path.exists(self.model_path):
-            logger.error(f"✗ Model file not found: {self.model_path}")
+            logger.error(f" Model file not found: {self.model_path}")
             raise FileNotFoundError(f"Model file not found: {self.model_path}")
         
         try:
             self.model = joblib.load(self.model_path)
             file_size = os.path.getsize(self.model_path) / (1024**2)  # MB
             
-            logger.info(f"✓ Model loaded successfully:")
+            logger.info(f" Model loaded successfully:")
             logger.info(f"  • Model Type: {type(self.model).__name__}")
             logger.info(f"  • File Size: {file_size:.2f} MB")
             
         except Exception as e:
-            logger.error(f"✗ Failed to load model: {str(e)}")
+            logger.error(f" Failed to load model: {str(e)}")
             raise
 
     def load_encoders(self, encoders_dir: str) -> None:
@@ -127,7 +127,7 @@ class ModelInference:
         logger.info(f"{'='*50}")
         
         if not os.path.exists(encoders_dir):
-            logger.error(f"✗ Encoders directory not found: {encoders_dir}")
+            logger.error(f" Encoders directory not found: {encoders_dir}")
             raise FileNotFoundError(f"Encoders directory not found: {encoders_dir}")
         
         try:
@@ -147,13 +147,13 @@ class ModelInference:
                     encoder_data = json.load(f)
                     self.encoders[feature_name] = encoder_data
                     
-                logger.info(f"  ✓ Loaded encoder for '{feature_name}': {len(encoder_data)} mappings")
+                logger.info(f"  Loaded encoder for '{feature_name}': {len(encoder_data)} mappings")
             
-            logger.info(f"✓ All encoders loaded successfully")
+            logger.info(f" All encoders loaded successfully")
             logger.info(f"{'='*50}\n")
             
         except Exception as e:
-            logger.error(f"✗ Failed to load encoders: {str(e)}")
+            logger.error(f" Failed to load encoders: {str(e)}")
             raise
 
     def preprocess_input(self, data: Dict[str, Any]) -> pd.DataFrame:
@@ -175,13 +175,13 @@ class ModelInference:
         logger.info(f"{'='*50}")
         
         if not data or not isinstance(data, dict):
-            logger.error("✗ Input data must be a non-empty dictionary")
+            logger.error(" Input data must be a non-empty dictionary")
             raise ValueError("Input data must be a non-empty dictionary")
         
         try:
             # Convert to DataFrame
             df = pd.DataFrame([data])
-            logger.info(f"✓ Input data converted to DataFrame: {df.shape}")
+            logger.info(f" Input data converted to DataFrame: {df.shape}")
             logger.info(f"  • Input features: {list(df.columns)}")
             
             # Apply encoders
