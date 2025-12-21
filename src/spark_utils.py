@@ -90,10 +90,10 @@ def save_dataframe(
         else:
             writer.options(**options).format(format).save(path)
         
-        logger.info(f"✓ Saved DataFrame to {path} as {format}")
+        logger.info(f" Saved DataFrame to {path} as {format}")
         
     except Exception as e:
-        logger.error(f"✗ Error saving DataFrame: {str(e)}")
+        logger.error(f" Error saving DataFrame: {str(e)}")
         raise
 
 
@@ -145,11 +145,11 @@ def load_dataframe(
         else:
             df = reader.options(**options).format(format).load(path)
         
-        logger.info(f"✓ Loaded DataFrame from {path} ({df.count()} rows, {len(df.columns)} columns)")
+        logger.info(f" Loaded DataFrame from {path} ({df.count()} rows, {len(df.columns)} columns)")
         return df
         
     except Exception as e:
-        logger.error(f"✗ Error loading DataFrame: {str(e)}")
+        logger.error(f" Error loading DataFrame: {str(e)}")
         raise
 
 
@@ -183,7 +183,7 @@ def get_dataframe_info(df: DataFrame) -> Dict:
         return info
         
     except Exception as e:
-        logger.error(f"✗ Error getting DataFrame info: {str(e)}")
+        logger.error(f" Error getting DataFrame info: {str(e)}")
         return {}
 
 

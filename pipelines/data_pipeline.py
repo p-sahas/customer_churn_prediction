@@ -100,7 +100,7 @@ def save_processed_data(
         Y_train_pd.to_csv(paths['Y_train_csv'], index=False)
         Y_test_pd.to_csv(paths['Y_test_csv'], index=False)
         
-        logger.info("✓ CSV files saved")
+        logger.info(" CSV files saved")
     
     if output_format in ["parquet", "both"]:
         # Save as Parquet

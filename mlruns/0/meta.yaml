@@ -1,7 +1,7 @@
-artifact_location: file:D:/Courses/_Zuu Crew/Build Production-Ready Machine Learning
-  Systems - Zuu Crew/_Programming/Week 05-06/mlruns/0
-creation_time: 1762352591465
+artifact_location: file:///mnt/d/Courses/_Zuu Crew/Build Production-Ready Machine
+  Learning Systems - Zuu Crew/_Programming/customer_churn_prediction/mlruns/0
+creation_time: 1766343894633
 experiment_id: '0'
-last_update_time: 1762352591465
+last_update_time: 1766343894633
 lifecycle_stage: active
 name: Default
