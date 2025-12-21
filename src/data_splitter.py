@@ -99,7 +99,22 @@ class SimpleTrainTestSplitStrategy(DataSplittingStrategy):
         Returns:
             Tuple of (X_train, X_test, Y_train, Y_test) DataFrames
         """
-        pass
+        # Random split (non-stratified)
+        train_df, test_df = df.randomSplit([self.train_size, self.test_size], seed=self.random_seed)
+
+        # Separate features and target
+        X_train = train_df.drop(target_column)
+        Y_train = train_df.select(target_column)
+
+        X_test = test_df.drop(target_column)
+        Y_test = test_df.select(target_column)
+
+        logger.info(f"\n{'='*60}")
+        logger.info("✓ DATA SPLITTING COMPLETE")
+        logger.info(f"  • Train rows: {train_df.count()}, Test rows: {test_df.count()}")
+        logger.info(f"{'='*60}\n")
+
+        return X_train, X_test, Y_train, Y_test
 
 
 class DataSplitter:
@@ -127,6 +142,11 @@ class DataSplitter:
             Tuple of (X_train, X_test, Y_train, Y_test) DataFrames
         """
         return self.strategy.split_data(df, target_column)
+
+# Backward-compatible function with corrected class name (overrides earlier misspelled version)
+def create_simple_splitter(test_size: float = 0.2, spark: Optional[SparkSession] = None):
+    """Create a simple train-test splitter (backward compatibility)."""
+    return SimpleTrainTestSplitStrategy(test_size=test_size, spark=spark)
 
 def create_simple_splitter(test_size: float = 0.2, spark: Optional[SparkSession] = None):
     """Create a simple train-test splitter (backward compatibility)."""

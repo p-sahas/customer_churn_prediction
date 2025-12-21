@@ -89,6 +89,9 @@ class DropMissingValuesStrategy(MissingValueHandlingStrategy):
         logger.info(f"  • Initial rows: {initial_count}")
         logger.info(f"  • Final rows: {final_count}")
 
+        # Return the cleaned DataFrame
+        return df_cleaned
+
 
 class Gender(str, Enum):
     """Gender enumeration."""

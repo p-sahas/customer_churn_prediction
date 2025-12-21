@@ -128,7 +128,7 @@ class CustomBinningStrategy(FeatureBinningStrategy):
         for bin_label, bin_range in self.bin_definitions.items():
             if len(bin_range) == 2:
                 case_expr = case_expr.when(
-                                        (F.col(column) >= bin_range[0]) & F.col(column) <= bin_range[1], 
+                                        (F.col(column) >= bin_range[0]) & (F.col(column) <= bin_range[1]), 
                                         bin_label
                                         )
             elif len(bin_range) == 1:

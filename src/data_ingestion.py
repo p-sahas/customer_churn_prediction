@@ -75,6 +75,8 @@ class DataIngestorCSV(DataIngestor):
             ############### PYSPARK CODES ###########################
             df = self.spark.read.options(**csv_options).csv(file_path_or_link)
             
+            return df
+        
         except Exception as e:
             logger.error(f" Failed to load CSV data from {file_path_or_link}: {str(e)}")
             logger.info(f"{'='*60}\n")
@@ -115,6 +117,8 @@ class DataIngestorExcel(DataIngestor):
             ############### PYSPARK CODES ###########################
             pandas_df = pd.read_excel(file_path_or_link)
             df = self.spark.createDataFrame(pandas_df)
+
+            return df
             
         except Exception as e:
             logger.error(f" Failed to load Excel data from {file_path_or_link}: {str(e)}")
@@ -146,6 +150,8 @@ class DataIngestorParquet(DataIngestor):
             # Read Parquet file(s)
             df = self.spark.read.options(**csv_options).parquet(file_path_or_link)
             
+            return df
+        
         except Exception as e:
             logger.error(f" Failed to load Parquet data from {file_path_or_link}: {str(e)}")
             logger.info(f"{'='*60}\n")
