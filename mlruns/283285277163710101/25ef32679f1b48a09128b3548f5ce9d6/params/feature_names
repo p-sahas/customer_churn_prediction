@@ -1,0 +1,1 @@
+['Geography', 'Gender', 'Age', 'Tenure', 'Balance', 'NumOfProducts', 'HasCrCard', 'IsActiveMember', 'EstimatedSalary', 'CreditScore_outlier', 'Age_outlier', 'NumOfProducts_outlier', 'CreditScoreBins', 'Geography_index', 'Gender_index']
