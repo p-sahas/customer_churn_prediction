@@ -106,7 +106,38 @@ class ModelInference:
             logger.info(f" Model loaded successfully:")
             logger.info(f"  • Model Type: {type(self.model).__name__}")
             logger.info(f"  • File Size: {file_size:.2f} MB")
-            
+
+            # Try to capture expected feature names used during training
+            self.expected_feature_names = None
+            # 1) Check for saved feature_names file in artifacts/encode
+            feature_names_file = os.path.join('artifacts', 'encode', 'feature_names.json')
+            if os.path.exists(feature_names_file):
+                try:
+                    with open(feature_names_file, 'r') as f:
+                        self.expected_feature_names = json.load(f)
+                    logger.info(f"Loaded expected feature names from {feature_names_file}")
+                except Exception:
+                    logger.warning("Could not read feature_names.json file")
+
+            # 2) Fallback: try to get feature names from the trained booster
+            if self.expected_feature_names is None:
+                try:
+                    booster = None
+                    if hasattr(self.model, 'get_booster'):
+                        booster = self.model.get_booster()
+                    elif hasattr(self.model, 'booster_'):
+                        booster = self.model.booster_
+                    if booster is not None and hasattr(booster, 'feature_names'):
+                        self.expected_feature_names = list(booster.feature_names)
+                        logger.info("Loaded expected feature names from model booster")
+                except Exception:
+                    logger.warning("Could not read feature names from model")
+
+            if self.expected_feature_names is None:
+                logger.warning("Expected feature names not found; inference will attempt to proceed but may fail if feature mismatch occurs")
+            else:
+                logger.info(f" Expected features for model: {self.expected_feature_names}")
+
         except Exception as e:
             logger.error(f" Failed to load model: {str(e)}")
             raise
@@ -190,7 +221,11 @@ class ModelInference:
                 for col, encoder in self.encoders.items():
                     if col in df.columns:
                         original_value = df[col].iloc[0]
-                        df[col] = df[col].map(encoder)
+                        # Use mapping with default for unknown values
+                        mapped = df[col].map(lambda val: encoder.get(str(val), None))
+                        if mapped.isnull().any():
+                            logger.warning(f"  ⚠ Unknown category encountered for '{col}', setting to -1 for unseen values")
+                        df[col] = mapped.fillna(-1).astype(int)
                         encoded_value = df[col].iloc[0]
                         logger.info(f"  ✓ Encoded '{col}': {original_value} → {encoded_value}")
                     else:
@@ -262,23 +297,43 @@ class ModelInference:
                 df = df.drop(columns=existing_drop_columns)
                 logger.info(f"  ✓ Dropped columns: {existing_drop_columns}")
             
-            # Reorder columns to match training data
-            expected_columns = ['Age', 'Tenure', 'NumOfProducts', 'HasCrCard', 'IsActiveMember', 
-                              'Geography', 'Gender', 'CreditScoreBins', 'Balance', 'EstimatedSalary']
-            
-            # Check if all expected columns are present
+            # Reorder columns to match training data (use expected_feature_names if available)
+            if hasattr(self, 'expected_feature_names') and self.expected_feature_names:
+                expected_columns = list(self.expected_feature_names)
+            else:
+                expected_columns = ['Age', 'Tenure', 'NumOfProducts', 'HasCrCard', 'IsActiveMember', 
+                                  'Geography', 'Gender', 'CreditScoreBins', 'Balance', 'EstimatedSalary']
+
+            # Add missing columns with sensible defaults
             missing_columns = [col for col in expected_columns if col not in df.columns]
             if missing_columns:
-                logger.warning(f"  ⚠ Missing columns: {missing_columns}")
-            
-            # Reorder columns to match training order
-            available_columns = [col for col in expected_columns if col in df.columns]
-            df = df[available_columns]
-            
+                logger.info(f" Filling missing expected columns with defaults: {missing_columns}")
+            for col in missing_columns:
+                if col.endswith('_outlier'):
+                    df[col] = 0
+                elif col.endswith('_index'):
+                    base = col.replace('_index', '')
+                    if base in df.columns:
+                        # if base exists and is numeric use it, otherwise try encoder mapping
+                        try:
+                            df[col] = df[base].astype(int)
+                        except Exception:
+                            # try encoder mapping
+                            enc = self.encoders.get(base, {})
+                            df[col] = df[base].map(lambda v: enc.get(str(v), -1)).astype(int)
+                    else:
+                        df[col] = -1
+                else:
+                    # numeric default
+                    df[col] = 0
+
+            # Ensure columns are in the exact order expected by the model
+            df = df[[col for col in expected_columns]]
+
             logger.info(f" Preprocessing completed - Final shape: {df.shape}")
             logger.info(f"  • Final features (reordered): {list(df.columns)}")
             logger.info(f"{'='*50}\n")
-            
+
             return df
             
         except Exception as e:
