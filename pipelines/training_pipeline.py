@@ -18,7 +18,7 @@ from model_evaluation import ModelEvaluator
 from model_building import XGboostModelBuilder, RandomForestModelBuilder
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
 from mlflow_utils import MLflowTracker, create_mlflow_run_tags
-from config import get_model_config, get_data_paths
+from config import get_model_config, get_data_paths, get_encoding_config
 import mlflow
 
 logging.basicConfig(level=logging.INFO, format=
@@ -115,8 +115,70 @@ def training_pipeline(
         Y_train = spark_to_pandas(Y_train_spark)
         X_test = spark_to_pandas(X_test_spark)
         Y_test = spark_to_pandas(Y_test_spark)
-        
+
         logger.info(f" Converted to pandas - Training: {X_train.shape}, Test: {X_test.shape}")
+
+        # Ensure nominal categorical columns are encoded to numeric integers for XGBoost
+        encoding_config = get_encoding_config()
+        nominal_cols = encoding_config.get('nominal_columns', []) if encoding_config else []
+        encoder_dir = os.path.join('artifacts', 'encode')
+        os.makedirs(encoder_dir, exist_ok=True)
+
+        for col in nominal_cols:
+            try:
+                encoder_file = os.path.join(encoder_dir, f"{col}_encoder.json")
+
+                # If an encoder file already exists, use it to map values consistently
+                if os.path.exists(encoder_file):
+                    with open(encoder_file, 'r') as f:
+                        mapping = json.load(f)
+                    logger.info(f"Loaded existing encoder for '{col}' with {len(mapping)} categories")
+
+                    # Apply mapping and handle unseen categories
+                    X_train[col] = X_train[col].map(mapping).fillna(-1).astype(int)
+                    X_test[col] = X_test[col].map(mapping).fillna(-1).astype(int)
+
+                else:
+                    # Build mapping from training data categories
+                    if col in X_train.columns:
+                        X_train[col] = X_train[col].fillna('Unknown').astype('category')
+                        cat = X_train[col].cat
+                        mapping = {str(cat.categories[i]): int(i) for i in range(len(cat.categories))}
+
+                        # Replace values with integer codes
+                        X_train[col] = cat.codes.astype(int)
+
+                        # Apply same categories to test set; unseen values will be coded as -1
+                        X_test[col] = pd.Categorical(X_test[col].fillna('Unknown'), categories=cat.categories).codes.astype(int)
+
+                        # Save encoder mapping for inference
+                        with open(encoder_file, 'w') as f:
+                            json.dump(mapping, f, indent=2)
+
+                        logger.info(f"Saved encoder mapping for '{col}' with {len(mapping)} categories to {encoder_file}")
+                        # Log mapping as MLflow artifact
+                        mlflow.log_artifact(encoder_file, artifact_path='encoders')
+                    else:
+                        logger.warning(f"Nominal column '{col}' not present in training data - skipping encoding")
+
+            except Exception as e:
+                logger.error(f" Failed to encode nominal column '{col}': {str(e)}")
+                raise
+
+        logger.info("Nominal encoding applied to pandas DataFrames (training & test)")
+
+        # Save final feature names used for training so inference can match them exactly
+        feature_names = list(X_train.columns)
+        feature_names_path = os.path.join('artifacts', 'encode', 'feature_names.json')
+        os.makedirs(os.path.dirname(feature_names_path), exist_ok=True)
+        with open(feature_names_path, 'w') as f:
+            json.dump(feature_names, f, indent=2)
+        logger.info(f"Saved feature names used for training to {feature_names_path}")
+        # Log as MLflow artifact for traceability
+        try:
+            mlflow.log_artifact(feature_names_path, artifact_path='encoders')
+        except Exception:
+            logger.warning("Could not log feature names artifact to MLflow")
         
         # Log dataset information
         mlflow.log_metrics({
