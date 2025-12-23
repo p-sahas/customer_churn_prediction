@@ -38,7 +38,7 @@ env.bak/
 venv.bak/
 pyvenv.cfg
 .airflow/
-
+.airflow
 # ==========================================
 # Jupyter Notebook
 # ==========================================
