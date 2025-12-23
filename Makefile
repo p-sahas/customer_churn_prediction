@@ -5,6 +5,10 @@
 # Default Python interpreter
 PYTHON = python
 VENV = .venv/bin/activate
+
+# Activate venv
+#source .venv/bin/activate
+
 MLFLOW_PORT ?= 5001
 
 SHELL := /bin/bash
