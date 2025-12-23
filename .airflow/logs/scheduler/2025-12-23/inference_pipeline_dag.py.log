@@ -1,0 +1,14 @@
+[2025-12-23T23:54:21.506+0530] {processor.py:186} INFO - Started process (PID=1578) to work on /mnt/d/Courses/_Zuu Crew/Build Production-Ready Machine Learning Systems - Zuu Crew/_Programming/customer_churn_prediction/.airflow/dags/inference_pipeline_dag.py
+[2025-12-23T23:54:21.509+0530] {processor.py:914} INFO - Processing file /mnt/d/Courses/_Zuu Crew/Build Production-Ready Machine Learning Systems - Zuu Crew/_Programming/customer_churn_prediction/.airflow/dags/inference_pipeline_dag.py for tasks to queue
+[2025-12-23T23:54:21.513+0530] {logging_mixin.py:190} INFO - [2025-12-23T23:54:21.512+0530] {dagbag.py:588} INFO - Filling up the DagBag from /mnt/d/Courses/_Zuu Crew/Build Production-Ready Machine Learning Systems - Zuu Crew/_Programming/customer_churn_prediction/.airflow/dags/inference_pipeline_dag.py
+[2025-12-23T23:54:21.559+0530] {logging_mixin.py:190} INFO - [2025-12-23T23:54:21.547+0530] {dagbag.py:387} ERROR - Failed to import: /mnt/d/Courses/_Zuu Crew/Build Production-Ready Machine Learning Systems - Zuu Crew/_Programming/customer_churn_prediction/.airflow/dags/inference_pipeline_dag.py
+Traceback (most recent call last):
+  File "/mnt/d/Courses/_Zuu Crew/Build Production-Ready Machine Learning Systems - Zuu Crew/_Programming/customer_churn_prediction/.venv/lib/python3.12/site-packages/airflow/models/dagbag.py", line 383, in parse
+    loader.exec_module(new_module)
+  File "<frozen importlib._bootstrap_external>", line 995, in exec_module
+  File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+  File "/mnt/d/Courses/_Zuu Crew/Build Production-Ready Machine Learning Systems - Zuu Crew/_Programming/customer_churn_prediction/.airflow/dags/inference_pipeline_dag.py", line 10, in <module>
+    from utils.airflow_tasks import validate_trained_model, run_inference_pipeline
+ModuleNotFoundError: No module named 'utils'
+[2025-12-23T23:54:21.562+0530] {processor.py:927} WARNING - No viable dags retrieved from /mnt/d/Courses/_Zuu Crew/Build Production-Ready Machine Learning Systems - Zuu Crew/_Programming/customer_churn_prediction/.airflow/dags/inference_pipeline_dag.py
+[2025-12-23T23:54:21.620+0530] {processor.py:208} INFO - Processing /mnt/d/Courses/_Zuu Crew/Build Production-Ready Machine Learning Systems - Zuu Crew/_Programming/customer_churn_prediction/.airflow/dags/inference_pipeline_dag.py took 0.127 seconds
