@@ -1,0 +1,15 @@
+artifact_uri: file:///mnt/d/Courses/_Zuu Crew/Build Production-Ready Machine Learning
+  Systems - Zuu Crew/_Programming/customer_churn_prediction/mlruns/104542455135004463/2736dabfd35e488ab50346e60f421f93/artifacts
+end_time: 1766513088710
+entry_point_name: ''
+experiment_id: '104542455135004463'
+lifecycle_stage: active
+run_id: 2736dabfd35e488ab50346e60f421f93
+run_name: training pipeline | 2025-12-23 23:33:27
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1766513007073
+status: 3
+tags: []
+user_id: sahas
