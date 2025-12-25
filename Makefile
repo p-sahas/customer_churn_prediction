@@ -411,6 +411,8 @@ stop-all:
 PID_DIR := runtime/pids
 LOG_FILE := runtime/kafka.log
 
+#rm -rf runtime/kafka-logs /tmp/kraft-combined-logs
+
 kafka-format:
 	@echo "🔧 Formatting native Kafka storage (KRaft mode)..."
 	@if [ -z "$$KAFKA_HOME" ]; then echo "❌ KAFKA_HOME not set. Run 'source ~/.bashrc'"; exit 1; fi
