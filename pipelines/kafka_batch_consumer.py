@@ -27,7 +27,11 @@ logger = logging.getLogger(__name__)
 # Constants
 INPUT_TOPIC = "churn_predictions"
 OUTPUT_TOPIC = "churn_predictions_scored"
-MODEL_PATH = "artifacts/models/spark_random_forest_model"
+
+# Default model path can come from config; we try to find a sklearn (.joblib) model by default
+from utils.config import get_model_config
+_model_cfg = get_model_config() or {}
+MODEL_PATH = os.environ.get('MODEL_PATH') or _model_cfg.get('model_path') or 'artifacts/models/churn_analysis.joblib'
 
 
 class MLKafkaConsumer:
@@ -39,14 +43,47 @@ class MLKafkaConsumer:
     def initialize(self):
         """Initialize ML model"""
         try:
-            self.model = ModelInference(model_path=MODEL_PATH, use_spark=False)
-            
-            # Load encoders
+            # Resolve model path - prefer a local sklearn .joblib model if available
+            resolved_path = MODEL_PATH
+
+            # If configured path doesn't exist, search for any .joblib files in artifacts/models
+            if not os.path.exists(resolved_path):
+                logger.warning(f"Configured model path not found: {resolved_path}. Searching for .joblib models in artifacts/models...")
+                candidates = [os.path.join('artifacts', 'models', f) for f in os.listdir(os.path.join('artifacts', 'models')) if f.endswith('.joblib')]
+                if candidates:
+                    # Pick the most recent file by modification time
+                    candidates.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+                    resolved_path = candidates[0]
+                    logger.info(f"Found fallback sklearn model: {resolved_path}")
+                else:
+                    # Nothing to fall back to; provide a helpful error message
+                    available = []
+                    if os.path.exists('artifacts/models'):
+                        available = os.listdir('artifacts/models')
+                    logger.error(
+                        "No sklearn (.joblib) model found in 'artifacts/models'. "
+                        f"Checked configured path: {MODEL_PATH}. Available entries: {available}"
+                    )
+                    return False
+
+            # If resolved model is a directory (likely a Spark ML model) we enforce joblib usage for this consumer
+            if os.path.isdir(resolved_path):
+                logger.error(
+                    f"Resolved model path is a directory (likely a Spark ML model): {resolved_path}. "
+                    "The Kafka consumer currently expects a scikit-learn model saved as a .joblib file. "
+                    "Please provide a .joblib model or switch to a consumer that supports Spark models."
+                )
+                return False
+
+            # Initialize ModelInference with the resolved model file
+            self.model = ModelInference(model_path=resolved_path, use_spark=False)
+
+            # Load encoders (if present)
             encoders_dir = "artifacts/encode"
             if os.path.exists(encoders_dir):
                 self.model.load_encoders(encoders_dir)
                 logger.info("✅ ML model and encoders loaded")
-            
+
             return True
         except Exception as e:
             logger.error(f"❌ Initialization failed: {str(e)}")

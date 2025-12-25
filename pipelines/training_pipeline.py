@@ -3,22 +3,20 @@ import sys
 import logging
 import pandas as pd
 import numpy as np
-from data_pipeline import data_pipeline
+from pipelines.data_pipeline import data_pipeline
 from typing import Dict, Any, Optional
 import json
 from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql import functions as F
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))
 
-from spark_session import create_spark_session, stop_spark_session
-from spark_utils import spark_to_pandas
+from src.spark_session import create_spark_session, stop_spark_session
+from src.spark_utils import spark_to_pandas
 
-from model_training import ModelTrainer
-from model_evaluation import ModelEvaluator
-from model_building import XGboostModelBuilder, RandomForestModelBuilder
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
-from mlflow_utils import MLflowTracker, create_mlflow_run_tags
-from config import get_model_config, get_data_paths, get_encoding_config
+from src.model_training import ModelTrainer
+from src.model_evaluation import ModelEvaluator
+from src.model_building import XGboostModelBuilder, RandomForestModelBuilder
+from utils.mlflow_utils import MLflowTracker, create_mlflow_run_tags
+from utils.config import get_model_config, get_data_paths, get_encoding_config
 import mlflow
 
 logging.basicConfig(level=logging.INFO, format=

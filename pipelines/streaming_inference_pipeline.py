@@ -12,10 +12,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))
-from model_inference import ModelInference
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
-from mlflow_utils import MLflowTracker, create_mlflow_run_tags
+from src.model_inference import ModelInference
+from utils.mlflow_utils import MLflowTracker, create_mlflow_run_tags
 import mlflow
 
 

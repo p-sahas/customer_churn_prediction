@@ -18,19 +18,17 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))
-from spark_session import create_spark_session, stop_spark_session
-from spark_utils import save_dataframe, spark_to_pandas, get_dataframe_info, check_missing_values
-from data_ingestion import DataIngestorCSV
-from handle_missing_values import DropMissingValuesStrategy, FillMissingValuesStrategy, GenderImputer
-from outlier_detection import OutlierDetector, IQROutlierDetection
-from feature_binning import CustomBinningStrategy
-from feature_encoding import OrdinalEncodingStrategy, NominalEncodingStrategy
-from feature_scaling import MinMaxScalingStrategy
-from data_splitter import SimpleTrainTestSplitStrategy
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
-from config import get_data_paths, get_columns, get_missing_values_config, get_outlier_config, get_binning_config, get_encoding_config, get_scaling_config, get_splitting_config
-from mlflow_utils import MLflowTracker, setup_mlflow_autolog, create_mlflow_run_tags
+from src.spark_session import create_spark_session, stop_spark_session
+from src.spark_utils import save_dataframe, spark_to_pandas, get_dataframe_info, check_missing_values
+from src.data_ingestion import DataIngestorCSV
+from src.handle_missing_values import DropMissingValuesStrategy, FillMissingValuesStrategy, GenderImputer
+from src.outlier_detection import OutlierDetector, IQROutlierDetection
+from src.feature_binning import CustomBinningStrategy
+from src.feature_encoding import OrdinalEncodingStrategy, NominalEncodingStrategy
+from src.feature_scaling import MinMaxScalingStrategy
+from src.data_splitter import SimpleTrainTestSplitStrategy
+from utils.config import get_data_paths, get_columns, get_missing_values_config, get_outlier_config, get_binning_config, get_encoding_config, get_scaling_config, get_splitting_config
+from utils.mlflow_utils import MLflowTracker, setup_mlflow_autolog, create_mlflow_run_tags
 import mlflow
 
 
