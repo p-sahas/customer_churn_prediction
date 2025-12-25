@@ -60,41 +60,73 @@ elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
         echo " Installing Java 17..."
         sudo apt update
         sudo apt install -y openjdk-17-jdk
+    else
+        echo " Java is already installed."
     fi
     
     echo " Downloading Apache Kafka..."
     KAFKA_VERSION="3.7.0"
+    SCALA_VERSION="2.13"
+    FILENAME="kafka_${SCALA_VERSION}-${KAFKA_VERSION}.tgz"
+    # UPDATED URL: Use archive.apache.org to prevent 404s on older versions
+    DOWNLOAD_URL="https://archive.apache.org/dist/kafka/$KAFKA_VERSION/$FILENAME"
+    
     cd ~
     
-    # Download if not already present
-    if [[ ! -f "kafka_2.13-$KAFKA_VERSION.tgz" ]]; then
-        curl -O "https://downloads.apache.org/kafka/$KAFKA_VERSION/kafka_2.13-$KAFKA_VERSION.tgz"
+    # Clean up previous broken downloads if they exist
+    if [[ -f "$FILENAME" ]]; then
+        echo " Found existing file. verifying..."
+        # Check if it is a valid gzip file
+        if ! gzip -t "$FILENAME" &>/dev/null; then
+            echo " Existing file is corrupt (probably HTML). Deleting and redownloading..."
+            rm "$FILENAME"
+        fi
+    fi
+
+    # Download if not present
+    if [[ ! -f "$FILENAME" ]]; then
+        echo " Fetching from Archive: $DOWNLOAD_URL"
+        # -f fails on HTTP errors, -L follows redirects
+        if curl -fLO "$DOWNLOAD_URL"; then
+            echo " Download successful."
+        else
+            echo " Error: Download failed. Check your internet connection."
+            exit 1
+        fi
     fi
     
     echo " Extracting Kafka..."
-    tar -xzf "kafka_2.13-$KAFKA_VERSION.tgz"
+    tar -xzf "$FILENAME"
     
     # Move to standard location
     if [[ -d "kafka" ]]; then
-        rm -rf kafka_old
-        mv kafka kafka_old
+        echo " Removing old 'kafka' directory..."
+        rm -rf kafka
     fi
-    mv "kafka_2.13-$KAFKA_VERSION" kafka
+    
+    # Rename extracted folder to generic 'kafka'
+    mv "kafka_${SCALA_VERSION}-${KAFKA_VERSION}" kafka
     
     KAFKA_PATH="$HOME/kafka"
     echo " Kafka installed at: $KAFKA_PATH"
     
     # Add to shell profile
     SHELL_PROFILE="$HOME/.bashrc"
-    echo "# Apache Kafka for ML Pipeline" >> "$SHELL_PROFILE"
-    echo "export KAFKA_HOME=\"$KAFKA_PATH\"" >> "$SHELL_PROFILE"
-    echo "export PATH=\"\$KAFKA_HOME/bin:\$PATH\"" >> "$SHELL_PROFILE"
     
-    echo " Added environment variables to $SHELL_PROFILE"
+    # Avoid duplicate entries in .bashrc
+    if ! grep -q "KAFKA_HOME" "$SHELL_PROFILE"; then
+        echo "" >> "$SHELL_PROFILE"
+        echo "# Apache Kafka for ML Pipeline" >> "$SHELL_PROFILE"
+        echo "export KAFKA_HOME=\"$KAFKA_PATH\"" >> "$SHELL_PROFILE"
+        echo "export PATH=\"\$KAFKA_HOME/bin:\$PATH\"" >> "$SHELL_PROFILE"
+        echo " Added environment variables to $SHELL_PROFILE"
+    else
+        echo " Environment variables already exist in $SHELL_PROFILE"
+    fi
+    
     echo ""
     echo " To apply changes immediately, run:"
-    echo "   export KAFKA_HOME=\"$KAFKA_PATH\""
-    echo "   export PATH=\"\$KAFKA_HOME/bin:\$PATH\""
+    echo "   source ~/.bashrc"
     
 else
     echo " Unsupported operating system: $OSTYPE"
@@ -106,7 +138,7 @@ echo ""
 echo " Kafka installation completed!"
 echo ""
 echo " Next steps:"
-echo "   1. Restart your terminal or source your shell profile"
+echo "   1. Run: source ~/.bashrc"
 echo "   2. Run: make kafka-validate"
 echo "   3. Run: make kafka-format"  
 echo "   4. Run: make kafka-start"
