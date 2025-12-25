@@ -9,11 +9,9 @@ import pandas as pd
 from sklearn.base import BaseEstimator
 from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql import functions as F
-from spark_session import get_or_create_spark_session
-from spark_utils import spark_to_pandas
-
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
-from config import get_binning_config, get_encoding_config
+from src.spark_session import get_or_create_spark_session
+from src.spark_utils import spark_to_pandas
+from utils.config import get_binning_config, get_encoding_config
 logging.basicConfig(level=logging.INFO, format=
     '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)

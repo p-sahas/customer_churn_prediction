@@ -10,7 +10,7 @@ import pandas as pd  # Keep for educational comparison
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql.types import BooleanType
-from spark_session import get_or_create_spark_session
+from src.spark_session import get_or_create_spark_session
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)

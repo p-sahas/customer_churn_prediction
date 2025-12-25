@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from typing import Optional, Union
 import pandas as pd  # Keep pandas import for educational purposes
 from pyspark.sql import DataFrame, SparkSession
-from spark_session import get_or_create_spark_session
+from src.spark_session import get_or_create_spark_session
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
