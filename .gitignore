@@ -76,6 +76,8 @@ pyvenv.cfg
 credentials.json
 secrets.yaml
 secrets.yml
+config.yaml
+
 
 # ==========================================
 # ML Artifacts & Data
@@ -379,7 +381,7 @@ DEPLOYMENT_ISOLATION.md
 !tests/README_SIMPLIFIED.md
 !changelog.md
 !stepplan.md
-!config.yaml
+#!config.yaml
 !requirements.txt
 !requirements-mlflow.txt
 !Makefile
