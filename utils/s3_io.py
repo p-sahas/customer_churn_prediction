@@ -19,6 +19,11 @@ from config import get_s3_bucket, get_aws_region, get_s3_kms_arn
 logger = logging.getLogger(__name__)
 
 
+class S3CredentialsError(Exception):
+    """Raised when AWS credentials or profiles are not configured properly."""
+    pass
+
+
 def get_s3_client():
     """Create configured S3 client with retries and timeouts, Docker and local compatible"""
     import botocore.client
@@ -94,14 +99,23 @@ def get_s3_client():
     
     # Final fallback: try default boto3 behavior (should rarely be reached)
     logger.warning("⚠️ No explicit credentials found, trying default AWS credential chain")
-    import boto3
-    config = botocore.config.Config(
-        retries={"max_attempts": 5, "mode": "standard"},
-        connect_timeout=5,
-        read_timeout=30
-    )
-    return boto3.client('s3', region_name=region, config=config)
-
+    try:
+        import boto3
+        config = botocore.config.Config(
+            retries={"max_attempts": 5, "mode": "standard"},
+            connect_timeout=5,
+            read_timeout=30
+        )
+        return boto3.client('s3', region_name=region, config=config)
+    except botocore.exceptions.ProfileNotFound as e:
+        logger.error(f"❌ AWS profile not found: {e}")
+        raise S3CredentialsError("AWS profile not found. Please configure AWS credentials or set explicit environment variables.")
+    except botocore.exceptions.NoCredentialsError as e:
+        logger.error(f"❌ No AWS credentials available: {e}")
+        raise S3CredentialsError("No AWS credentials available. Please configure credentials via environment variables or AWS CLI.")
+    except Exception as e:
+        logger.error(f"❌ Failed to create S3 client: {e}")
+        raise S3CredentialsError(f"Failed to create S3 client: {e}")
 
 def put_bytes(data: bytes, *, key: str, content_type: Optional[str] = None) -> None:
     """
@@ -134,8 +148,39 @@ def put_bytes(data: bytes, *, key: str, content_type: Optional[str] = None) -> N
     try:
         s3_client.put_object(**put_kwargs)
         logger.info(f"✅ Uploaded {len(data)} bytes to s3://{bucket}/{key}")
+    except botocore.exceptions.ClientError as e:
+        # If KMS access is denied, optionally retry without server-side encryption for local dev
+        error_code = e.response.get('Error', {}).get('Code', '') if hasattr(e, 'response') else ''
+        if kms_key and error_code in ('AccessDenied', 'KMSAccessDeniedException'):
+            logger.warning(f"⚠️ KMS access denied for key {kms_key}: {e}. Retrying without SSE (unencrypted upload).")
+            put_kwargs.pop('ServerSideEncryption', None)
+            put_kwargs.pop('SSEKMSKeyId', None)
+            try:
+                s3_client.put_object(**put_kwargs)
+                logger.info(f"✅ Uploaded {len(data)} bytes to s3://{bucket}/{key} WITHOUT server-side encryption")
+                return
+            except Exception as e2:
+                logger.exception(f"❌ Failed to upload without SSE to s3://{bucket}/{key}: {e2}")
+                raise
+        logger.exception(f"❌ Failed to upload to s3://{bucket}/{key}: {e}")
+        raise
     except Exception as e:
-        logger.error(f"❌ Failed to upload to s3://{bucket}/{key}: {e}")
+        # If encryption or access issues prevent S3 upload, optionally fallback to local artifacts
+        from config import force_s3_io
+        if not force_s3_io():
+            # Save to local fallback path
+            project_root = Path(__file__).resolve().parents[1]
+            fallback_path = project_root / 'artifacts' / 's3_fallback' / key
+            fallback_path.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                with open(fallback_path, 'wb') as f:
+                    f.write(data)
+                logger.warning(f"⚠️ S3 upload failed; saved bytes locally to {fallback_path}")
+                return
+            except Exception as e2:
+                logger.exception(f"❌ Failed to save to local fallback path {fallback_path}: {e2}")
+                raise
+        logger.exception(f"❌ Failed to upload to s3://{bucket}/{key}: {e}")
         raise
 
 
@@ -158,7 +203,7 @@ def get_bytes(key: str) -> bytes:
         logger.info(f"✅ Downloaded {len(data)} bytes from s3://{bucket}/{key}")
         return data
     except Exception as e:
-        logger.error(f"❌ Failed to download from s3://{bucket}/{key}: {e}")
+        logger.exception(f"❌ Failed to download from s3://{bucket}/{key}: {e}")
         raise
 
 
@@ -194,8 +239,71 @@ def upload_file(local_path, *, key: str) -> None:
         )
         file_size = local_path.stat().st_size
         logger.info(f"✅ Uploaded {file_size} bytes from {local_path} to s3://{bucket}/{key}")
+    except botocore.exceptions.ClientError as e:
+        error_code = e.response.get('Error', {}).get('Code', '') if hasattr(e, 'response') else ''
+        if kms_key and error_code in ('AccessDenied', 'KMSAccessDeniedException'):
+            logger.warning(f"⚠️ KMS access denied for key {kms_key}: {e}. Retrying without SSE (unencrypted upload).")
+            # Retry without encryption
+            try:
+                s3_client.upload_file(
+                    str(local_path), 
+                    bucket, 
+                    key
+                )
+                file_size = local_path.stat().st_size
+                logger.info(f"✅ Uploaded {file_size} bytes from {local_path} to s3://{bucket}/{key} WITHOUT server-side encryption")
+                return
+            except Exception as e2:
+                # Attempt local fallback if allowed
+                from config import force_s3_io
+                if not force_s3_io():
+                    fallback_root = Path(__file__).resolve().parents[1] / 'artifacts' / 's3_fallback'
+                    dest = fallback_root / key
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    try:
+                        import shutil
+                        shutil.copy2(str(local_path), str(dest))
+                        logger.warning(f"⚠️ S3 upload failed; copied file locally to {dest}")
+                        return
+                    except Exception as e3:
+                        logger.exception(f"❌ Failed to copy to local fallback {dest}: {e3}")
+                        raise
+                logger.exception(f"❌ Failed to upload without SSE {local_path} to s3://{bucket}/{key}: {e2}")
+                raise
+        # Attempt local fallback if allowed
+        from config import force_s3_io
+        if not force_s3_io():
+            from pathlib import Path
+            fallback_root = Path(__file__).resolve().parents[1] / 'artifacts' / 's3_fallback'
+            dest = fallback_root / key
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                import shutil
+                shutil.copy2(str(local_path), str(dest))
+                logger.warning(f"⚠️ S3 upload failed; copied file locally to {dest}")
+                return
+            except Exception as e2:
+                logger.exception(f"❌ Failed to copy to local fallback {dest}: {e2}")
+                raise
+        logger.exception(f"❌ Failed to upload {local_path} to s3://{bucket}/{key}: {e}")
+        raise
     except Exception as e:
-        logger.error(f"❌ Failed to upload {local_path} to s3://{bucket}/{key}: {e}")
+        # Attempt local fallback if allowed
+        from config import force_s3_io
+        if not force_s3_io():
+            from pathlib import Path
+            fallback_root = Path(__file__).resolve().parents[1] / 'artifacts' / 's3_fallback'
+            dest = fallback_root / key
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                import shutil
+                shutil.copy2(str(local_path), str(dest))
+                logger.warning(f"⚠️ S3 upload failed; copied file locally to {dest}")
+                return
+            except Exception as e2:
+                logger.exception(f"❌ Failed to copy to local fallback {dest}: {e2}")
+                raise
+        logger.exception(f"❌ Failed to upload {local_path} to s3://{bucket}/{key}: {e}")
         raise
 
 
@@ -343,6 +451,9 @@ def list_keys(prefix: str = "") -> List[str]:
         
         logger.info(f"✅ Listed {len(keys)} keys with prefix '{prefix}' from s3://{bucket}")
         return keys
+    except S3CredentialsError as cred_err:
+        logger.warning(f"⚠️ AWS credentials not configured: {cred_err}. Returning empty key list.")
+        return []
     except Exception as e:
         logger.error(f"❌ Failed to list keys with prefix '{prefix}' from s3://{bucket}: {e}")
         raise
@@ -382,6 +493,9 @@ def key_exists(key: str) -> bool:
     try:
         s3_client.head_object(Bucket=bucket, Key=key)
         return True
+    except S3CredentialsError as cred_err:
+        logger.warning(f"⚠️ AWS credentials not configured: {cred_err}. Treating s3://{bucket}/{key} as not found.")
+        return False
     except s3_client.exceptions.NoSuchKey:
         return False
     except Exception as e:

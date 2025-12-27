@@ -1,13 +1,31 @@
 """
 Centralized SparkSession management for the churn prediction pipeline.
-Provides consistent Spark configuration across all modules.
+Provides consistent Spark configuration across all modules with S3A support.
 """
 
 import logging
 from typing import Optional
 from pyspark.sql import SparkSession
+import sys
+import os
+sys.path.append(os.path.dirname(__file__))
+from config import get_aws_region, get_s3_kms_arn
 
 logger = logging.getLogger(__name__)
+
+
+def _ms(val, default_ms):
+    """Convert timeout values to milliseconds, handling 's' suffix"""
+    # Accept "60s" style or "60000"
+    if isinstance(val, str) and val.lower().endswith("s"):
+        try:
+            return str(int(float(val[:-1]) * 1000))
+        except Exception:
+            return str(default_ms)
+    try:
+        return str(int(val))
+    except Exception:
+        return str(default_ms)
 
 
 def create_spark_session(
@@ -27,10 +45,15 @@ def create_spark_session(
         SparkSession: Configured SparkSession instance
     """
     try:
+        # Get AWS configuration
+        aws_region = get_aws_region()
+        kms_key_arn = get_s3_kms_arn()
+        
         # Base configuration for optimal performance
         builder = SparkSession.builder \
             .appName(app_name) \
             .master(master) \
+            .config("spark.jars.packages", "org.apache.hadoop:hadoop-aws:3.3.6,com.amazonaws:aws-java-sdk-bundle:1.12.262") \
             .config("spark.sql.adaptive.enabled", "true") \
             .config("spark.sql.adaptive.coalescePartitions.enabled", "true") \
             .config("spark.sql.adaptive.skewJoin.enabled", "true") \
@@ -42,7 +65,32 @@ def create_spark_session(
             .config("spark.sql.parquet.compression.codec", "snappy") \
             .config("spark.sql.parquet.mergeSchema", "false") \
             .config("spark.sql.parquet.filterPushdown", "true") \
-            .config("spark.sql.csv.parser.columnPruning.enabled", "true")
+            .config("spark.sql.csv.parser.columnPruning.enabled", "true") \
+            .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem") \
+            .config("spark.hadoop.fs.s3a.fast.upload", "true") \
+            .config("spark.hadoop.fs.s3a.aws.credentials.provider", "com.amazonaws.auth.EnvironmentVariableCredentialsProvider,com.amazonaws.auth.DefaultAWSCredentialsProviderChain") \
+            .config("spark.hadoop.fs.s3a.endpoint", f"s3.{aws_region}.amazonaws.com") \
+            .config("spark.hadoop.fs.s3a.connection.timeout", "60000") \
+            .config("spark.hadoop.fs.s3a.connection.establish.timeout", "60000") \
+            .config("spark.hadoop.fs.s3a.socket.timeout", "60000") \
+            .config("spark.hadoop.fs.s3a.attempts.maximum", "20") \
+            .config("spark.hadoop.fs.s3a.retry.limit", "20") \
+            .config("spark.hadoop.fs.s3a.retry.interval", "1000") \
+            .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "true") \
+            .config("spark.hadoop.fs.s3a.threads.max", "10") \
+            .config("spark.hadoop.fs.s3a.threads.core", "15") \
+            .config("spark.hadoop.fs.s3a.threads.keepalivetime", "60000") \
+            .config("spark.hadoop.fs.s3a.max.total.tasks", "5") \
+            .config("spark.hadoop.fs.s3a.connection.ttl", "86400000") \
+            .config("spark.hadoop.fs.s3a.multipart.purge.age", "86400000") \
+            .config("spark.hadoop.fs.s3a.multipart.threshold", "67108864") \
+            .config("spark.hadoop.fs.s3a.multipart.size", "67108864")
+        
+        # Add S3 encryption if KMS key is configured
+        if kms_key_arn:
+            builder = builder \
+                .config("spark.hadoop.fs.s3a.server-side-encryption-algorithm", "SSE-KMS") \
+                .config("spark.hadoop.fs.s3a.server-side-encryption.key", kms_key_arn)
         
         # Apply additional configuration if provided
         if config_options:
