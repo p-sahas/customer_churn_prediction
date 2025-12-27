@@ -41,12 +41,17 @@ wandb>=0.15.0
 # Testing
 pytest>=7.0.0
 pytest-cov>=4.0.0
+moto[boto3]>=4.2.0
 
 # Development Tools
 jupyter>=1.0.0
 ipykernel>=6.0.0
 black>=22.0.0
 flake8>=5.0.0
+
+# AWS S3 Integration
+boto3>=1.28.0
+botocore>=1.31.0
 
 # Optional: OpenAI for advanced imputation (if needed)
 groq>=0.11.0
@@ -71,4 +76,4 @@ confluent-kafka>=2.0.0
 # liblapack-dev 
 
 # Note: Native Kafka installation required separately
-# See kafka/README.md for installation instructions 
+ 
