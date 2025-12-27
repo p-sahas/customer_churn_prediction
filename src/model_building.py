@@ -5,6 +5,13 @@ from xgboost import XGBClassifier
 from abc import ABC, abstractmethod
 from sklearn.ensemble import RandomForestClassifier
 
+# PySpark MLlib imports
+from pyspark.ml.classification import RandomForestClassifier as SparkRandomForestClassifier
+from pyspark.ml.classification import GBTClassifier as SparkGBTClassifier
+from pyspark.ml.classification import LogisticRegression as SparkLogisticRegression
+from pyspark.ml.feature import VectorAssembler
+from pyspark.ml import Pipeline
+
 class BaseModelBuilder(ABC):
     def __init__(
                 self,
@@ -60,7 +67,69 @@ class XGboostModelBuilder(BaseModelBuilder):
     def build_model(self):
         self.model = XGBClassifier(**self.model_params)
         return self.model
-    
+
+
+# ========================================================================================
+# PYSPARK MLLIB MODEL BUILDERS - Simple versions matching original structure
+# ========================================================================================
+
+class SparkRandomForestModelBuilder(BaseModelBuilder):
+    def __init__(self, **kwargs):
+        default_params = {
+            'maxDepth': 10,
+            'numTrees': 100,
+            'seed': 42
+        }
+        default_params.update(kwargs)
+        super().__init__('SparkRandomForest', **default_params)
+
+    def build_model(self):
+        self.model = SparkRandomForestClassifier(**self.model_params)
+        return self.model
+
+    def save_model(self, filepath):
+        if self.model is None:
+            raise ValueError("No model to save. Build the model first.")
+        
+        # For PySpark models, we need to save the fitted pipeline
+        self.model.write().overwrite().save(filepath)
+        
+    def load_model(self, filepath):
+        if not os.path.exists(filepath):
+            raise ValueError("Can't load. File not found.")
+        
+        from pyspark.ml.classification import RandomForestClassificationModel
+        self.model = RandomForestClassificationModel.load(filepath)
+
+
+class SparkGBTModelBuilder(BaseModelBuilder):
+    def __init__(self, **kwargs):
+        default_params = {
+            'maxDepth': 5,
+            'maxIter': 100,
+            'seed': 42
+        }
+        default_params.update(kwargs)
+        super().__init__('SparkGBT', **default_params)
+
+    def build_model(self):
+        self.model = SparkGBTClassifier(**self.model_params)
+        return self.model
+
+    def save_model(self, filepath):
+        if self.model is None:
+            raise ValueError("No model to save. Build the model first.")
+        
+        self.model.write().overwrite().save(filepath)
+        
+    def load_model(self, filepath):
+        if not os.path.exists(filepath):
+            raise ValueError("Can't load. File not found.")
+        
+        from pyspark.ml.classification import GBTClassificationModel
+        self.model = GBTClassificationModel.load(filepath)
+
+
 # rf = RandomForestModelBuilder()
 # rf_model = rf.build_model()
 # print(rf_model)

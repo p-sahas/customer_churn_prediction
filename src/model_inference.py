@@ -9,8 +9,10 @@ import pandas as pd
 from sklearn.base import BaseEstimator
 from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql import functions as F
-from src.spark_session import get_or_create_spark_session
-from src.spark_utils import spark_to_pandas
+from utils.spark_session import get_or_create_spark_session
+from utils.spark_utils import spark_to_pandas
+
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
 from utils.config import get_binning_config, get_encoding_config
 logging.basicConfig(level=logging.INFO, format=
     '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -93,52 +95,318 @@ class ModelInference:
         """
         logger.info("Loading trained model...")
         
-        if not os.path.exists(self.model_path):
-            logger.error(f" Model file not found: {self.model_path}")
-            raise FileNotFoundError(f"Model file not found: {self.model_path}")
+        # Import S3 utilities for model loading
+        import sys
+        import os
+        sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
+        from s3_io import read_pickle, key_exists
+        from s3_artifact_manager import S3ArtifactManager
+        from config import get_s3_bucket
         
-        try:
-            self.model = joblib.load(self.model_path)
-            file_size = os.path.getsize(self.model_path) / (1024**2)  # MB
+        bucket = get_s3_bucket()
+        
+        # Try to load model from local artifacts first, then S3
+        logger.info("Loading model from local artifacts or S3...")
+        
+        import time
+        import glob
+        import json
+        start_time = time.time()
+        
+        # First, try to find local model metadata files
+        local_model_metadata_pattern = "artifacts/model_artifacts/model_metadata_*.json"
+        local_metadata_files = glob.glob(local_model_metadata_pattern)
+        
+        if local_metadata_files:
+            # Use the latest local metadata file
+            latest_local_metadata = max(local_metadata_files, key=os.path.getctime)
+            logger.info(f"Found local model metadata: {latest_local_metadata}")
             
-            logger.info(f" Model loaded successfully:")
-            logger.info(f"  • Model Type: {type(self.model).__name__}")
-            logger.info(f"  • File Size: {file_size:.2f} MB")
-
-            # Try to capture expected feature names used during training
-            self.expected_feature_names = None
-            # 1) Check for saved feature_names file in artifacts/encode
-            feature_names_file = os.path.join('artifacts', 'encode', 'feature_names.json')
-            if os.path.exists(feature_names_file):
-                try:
-                    with open(feature_names_file, 'r') as f:
-                        self.expected_feature_names = json.load(f)
-                    logger.info(f"Loaded expected feature names from {feature_names_file}")
-                except Exception:
-                    logger.warning("Could not read feature_names.json file")
-
-            # 2) Fallback: try to get feature names from the trained booster
-            if self.expected_feature_names is None:
-                try:
-                    booster = None
-                    if hasattr(self.model, 'get_booster'):
-                        booster = self.model.get_booster()
-                    elif hasattr(self.model, 'booster_'):
-                        booster = self.model.booster_
-                    if booster is not None and hasattr(booster, 'feature_names'):
-                        self.expected_feature_names = list(booster.feature_names)
-                        logger.info("Loaded expected feature names from model booster")
-                except Exception:
-                    logger.warning("Could not read feature names from model")
-
-            if self.expected_feature_names is None:
-                logger.warning("Expected feature names not found; inference will attempt to proceed but may fail if feature mismatch occurs")
+            with open(latest_local_metadata, 'r') as f:
+                metadata = json.load(f)
+            
+            model_artifacts_dir = os.path.dirname(latest_local_metadata)
+            mlflow_model_path = metadata.get('mlflow_model_path')
+            
+            logger.info(f"📁 Using local model artifacts from: {model_artifacts_dir}")
+            logger.info(f"📊 Model metadata: {metadata}")
+            
+        else:
+            # Fallback to S3 if no local metadata found
+            logger.info("No local model metadata found, trying S3...")
+            
+            # Get latest timestamp folder dynamically from S3
+            latest_timestamp = self._get_latest_model_timestamp_from_s3(bucket)
+            if not latest_timestamp:
+                logger.error(f"❌ No model timestamp folders found in S3")
+                raise FileNotFoundError(f"No model artifacts found in S3")
+                
+            model_artifacts_dir = f"artifacts/model_artifacts/{latest_timestamp}"
+            metadata_s3_key = f"{model_artifacts_dir}/model_metadata.json"
+            
+            logger.info(f"📁 Using latest model artifacts directory: {model_artifacts_dir}")
+            logger.info(f"🔍 Looking for metadata: s3://{bucket}/{metadata_s3_key}")
+            
+            # Try to read the metadata (optional - we can proceed without it)
+            metadata = {}
+            model_name = None
+            mlflow_model_path = None
+            
+            try:
+                from utils.s3_io import get_bytes, key_exists
+                if key_exists(metadata_s3_key):
+                    metadata_bytes = get_bytes(metadata_s3_key)
+                    metadata = json.loads(metadata_bytes.decode('utf-8'))
+                    model_name = metadata.get('model_name')
+                    mlflow_model_path = metadata.get('mlflow_model_path')
+                    
+                    logger.info(f"✅ Model metadata loaded:")
+                    logger.info(f"  • Model name: {model_name}")
+                    logger.info(f"  • MLflow path: {mlflow_model_path}")
+                else:
+                    logger.info(f"⚠️ No metadata file found, proceeding with dynamic discovery...")
+            except Exception as metadata_error:
+                logger.warning(f"⚠️ Failed to load metadata (proceeding anyway): {metadata_error}")
+                
+        # Try to load the Spark model directly from local or S3 model artifacts directory
+        try:
+            from pyspark.ml import PipelineModel
+            
+            if local_metadata_files:
+                # Load from local model artifacts
+                spark_model_path = metadata.get('spark_model_path', f"artifacts/model_artifacts/{metadata['timestamp']}/spark_model")
+                logger.info(f"🔍 Attempting to load Spark model from local path: {spark_model_path}")
+                
+                if os.path.exists(spark_model_path):
+                    self.model = PipelineModel.load(spark_model_path)
+                    self.model_type = 'spark_s3'
+                    logger.info(f"✅ Successfully loaded local Spark model from: {spark_model_path}")
+                    
+                    # Load encoders from local files
+                    if 'encoders' in metadata:
+                        for encoder_name, encoder_path in metadata['encoders'].items():
+                            if os.path.exists(encoder_path):
+                                logger.info(f"📋 Loading local encoder: {encoder_name} from {encoder_path}")
+                                with open(encoder_path, 'r') as f:
+                                    encoder_data = json.load(f)
+                                    self.encoders[encoder_name] = encoder_data
+                            else:
+                                logger.warning(f"⚠️ Local encoder not found: {encoder_path}")
+                    
+                    load_time = time.time() - start_time
+                    logger.info(f"✅ Local model loaded successfully in {load_time:.2f} seconds")
+                    return
+                else:
+                    raise FileNotFoundError(f"Local Spark model not found at: {spark_model_path}")
             else:
-                logger.info(f" Expected features for model: {self.expected_feature_names}")
+                # Construct S3A path for the Spark model directory
+                # The model should be saved as a directory in S3 model artifacts
+                spark_model_s3a_path = f"s3a://{bucket}/{model_artifacts_dir}/spark_model"
+                
+                logger.info(f"🔍 Attempting to load Spark model from: {spark_model_s3a_path}")
+                
+                # Try to load the PipelineModel directly from S3A
+                try:
+                    self.model = PipelineModel.load(spark_model_s3a_path)
+                    self.model_type = 'spark_s3'
+                    
+                    load_time = time.time() - start_time
+                    logger.info(f"✅ Model loaded directly from S3 in {load_time:.2f} seconds")
+                    logger.info(f"  • Model path: {spark_model_s3a_path}")
+                    logger.info(f"  • Model stages: {len(self.model.stages)}")
+                    
+                    # Load encoders from S3 data_artifacts folder
+                    self._load_encoders_from_s3()
+                    return
+                    
+                except Exception as s3_load_error:
+                    logger.warning(f"⚠️ Direct S3 Spark model loading failed: {s3_load_error}")
+                    logger.info("🔄 Trying sklearn model fallback...")
+                    
+                    # Try to load sklearn model from S3 model artifacts
+                    try:
+                        from utils.s3_io import read_pickle
+                        sklearn_model_key = f"{model_artifacts_dir}/sklearn_model.pkl"
+                        
+                        logger.info(f"🔍 Attempting to load sklearn model from: s3://{bucket}/{sklearn_model_key}")
+                        self.model = read_pickle(sklearn_model_key)
+                        self.model_type = 'sklearn_s3'
+                        
+                        load_time = time.time() - start_time
+                        logger.info(f"✅ Sklearn fallback model loaded from S3 in {load_time:.2f} seconds")
+                        logger.info(f"  • Model type: {type(self.model).__name__}")
+                        
+                        # Load encoders from S3 data_artifacts folder
+                        self._load_encoders_from_s3()
+                        return
+                        
+                    except Exception as sklearn_load_error:
+                        logger.warning(f"⚠️ Sklearn model loading also failed: {sklearn_load_error}")
+                        
+                        # Final fallback: Try MLflow if available
+                        if mlflow_model_path:
+                            logger.info(f"🔄 Final fallback - trying MLflow: {mlflow_model_path}")
+                            try:
+                                import mlflow.spark
+                                self.model = mlflow.spark.load_model(mlflow_model_path)
+                                self.model_type = 'spark_mlflow'
+                                
+                                load_time = time.time() - start_time
+                                logger.info(f"✅ Model loaded from MLflow final fallback in {load_time:.2f} seconds")
+                                
+                                # Load encoders from S3 data_artifacts folder
+                                self._load_encoders_from_s3()
+                                return
+                                
+                            except Exception as mlflow_fallback_error:
+                                logger.error(f"❌ All model loading methods failed!")
+                                logger.error(f"  • Spark S3: {s3_load_error}")
+                                logger.error(f"  • Sklearn S3: {sklearn_load_error}")
+                                logger.error(f"  • MLflow: {mlflow_fallback_error}")
+                                raise FileNotFoundError(f"All model loading failed. Check S3 model artifacts directory.")
+                        else:
+                            logger.error(f"❌ Both S3 model loading methods failed!")
+                            logger.error(f"  • Spark S3: {s3_load_error}")
+                            logger.error(f"  • Sklearn S3: {sklearn_load_error}")
+                            raise FileNotFoundError(f"No working model found in S3 model artifacts")
+                            
+                except Exception as model_load_error:
+                    logger.error(f"❌ Model loading failed: {model_load_error}")
+                    raise FileNotFoundError(f"Failed to load model from S3 artifacts: {model_load_error}")
+                    
+        except Exception as metadata_error:
+            logger.error(f"❌ Failed to read model metadata: {metadata_error}")
+            raise FileNotFoundError(f"Failed to read model metadata: {metadata_error}")
+            
+        logger.error(f"✗ No model metadata found for base name: {self.model_path}")
+        raise FileNotFoundError(f"No model metadata found with base name: {self.model_path}")
 
+    def _get_latest_model_timestamp_from_s3(self, bucket: str) -> Optional[str]:
+        """
+        Dynamically get the latest model timestamp folder from S3.
+        
+        Args:
+            bucket: S3 bucket name
+            
+        Returns:
+            Latest timestamp string or None if no folders found
+        """
+        try:
+            from utils.s3_io import list_keys
+            
+            # List all keys in model_artifacts directory
+            prefix = "artifacts/model_artifacts/"
+            keys = list_keys(prefix=prefix)
+            
+            # Extract timestamp folders (format: YYYYMMDDHHMMSS)
+            timestamps = set()
+            for key in keys:
+                # Remove prefix and get the first path component (timestamp)
+                relative_path = key[len(prefix):]
+                if '/' in relative_path:
+                    timestamp_candidate = relative_path.split('/')[0]
+                    # Validate it's a timestamp (14 digits)
+                    if timestamp_candidate.isdigit() and len(timestamp_candidate) == 14:
+                        timestamps.add(timestamp_candidate)
+            
+            if not timestamps:
+                logger.warning(f"⚠️ No timestamp folders found in s3://{bucket}/{prefix}")
+                return None
+                
+            # Get the latest (max) timestamp
+            latest_timestamp = max(timestamps)
+            logger.info(f"📅 Found {len(timestamps)} timestamp folders, using latest: {latest_timestamp}")
+            return latest_timestamp
+            
         except Exception as e:
-            logger.error(f" Failed to load model: {str(e)}")
-            raise
+            logger.error(f"❌ Failed to get latest timestamp from S3: {e}")
+            return None
+    
+    def _get_latest_data_timestamp_from_s3(self, bucket: str) -> Optional[str]:
+        """
+        Dynamically get the latest data artifacts timestamp folder from S3.
+        
+        Args:
+            bucket: S3 bucket name
+            
+        Returns:
+            Latest timestamp string or None if no folders found
+        """
+        try:
+            from utils.s3_io import list_keys
+            
+            # List all keys in data_artifacts directory
+            prefix = "artifacts/data_artifacts/"
+            keys = list_keys(prefix=prefix)
+            
+            # Extract timestamp folders (format: YYYYMMDDHHMMSS)
+            timestamps = set()
+            for key in keys:
+                # Remove prefix and get the first path component (timestamp)
+                relative_path = key[len(prefix):]
+                if '/' in relative_path:
+                    timestamp_candidate = relative_path.split('/')[0]
+                    # Validate it's a timestamp (14 digits)
+                    if timestamp_candidate.isdigit() and len(timestamp_candidate) == 14:
+                        timestamps.add(timestamp_candidate)
+            
+            if not timestamps:
+                logger.warning(f"⚠️ No data timestamp folders found in s3://{bucket}/{prefix}")
+                return None
+                
+            # Get the latest (max) timestamp
+            latest_timestamp = max(timestamps)
+            logger.info(f"📅 Found {len(timestamps)} data timestamp folders, using latest: {latest_timestamp}")
+            return latest_timestamp
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to get latest data timestamp from S3: {e}")
+            return None
+    
+    def _load_encoders_from_s3(self) -> None:
+        """Load feature encoders from S3 using dynamic timestamp discovery"""
+        try:
+            import json
+            from utils.s3_io import get_bytes, key_exists
+            from utils.config import get_s3_bucket
+            
+            bucket = get_s3_bucket()
+            logger.info("Loading feature encoders from S3...")
+            
+            # Get latest data artifacts timestamp dynamically (same logic as model loading)
+            latest_data_timestamp = self._get_latest_data_timestamp_from_s3(bucket)
+            if not latest_data_timestamp:
+                logger.warning("⚠️ No data artifacts timestamp folders found in S3")
+                logger.info("Continuing without encoders - some preprocessing steps may be skipped")
+                return
+            
+            logger.info(f"📅 Using latest data artifacts timestamp: {latest_data_timestamp}")
+            
+            # List of encoder files to look for
+            encoder_files = ['Gender_encoder.json', 'Geography_encoder.json']
+            
+            for encoder_file in encoder_files:
+                encoder_name = encoder_file.replace('_encoder.json', '')
+                encoder_path = f"artifacts/data_artifacts/{latest_data_timestamp}/{encoder_file}"
+                
+                try:
+                    if key_exists(encoder_path):
+                        logger.info(f"🔍 Loading {encoder_name} encoder from: s3://{bucket}/{encoder_path}")
+                        encoder_bytes = get_bytes(encoder_path)
+                        encoder_data = json.loads(encoder_bytes.decode('utf-8'))
+                        self.encoders[encoder_name] = encoder_data
+                        logger.info(f"✅ {encoder_name} encoder loaded successfully with {len(encoder_data)} mappings")
+                    else:
+                        logger.warning(f"⚠️ Encoder not found: {encoder_path}")
+                        
+                except Exception as encoder_error:
+                    logger.warning(f"⚠️ Failed to load {encoder_name} encoder: {encoder_error}")
+            
+            logger.info(f"✓ Loaded {len(self.encoders)} feature encoders from S3")
+            
+        except Exception as e:
+            logger.warning(f"⚠ Failed to load encoders from S3: {e}")
+            logger.info("Continuing without encoders - some preprocessing steps may be skipped")
 
     def load_encoders(self, encoders_dir: str) -> None:
         """
@@ -156,7 +424,7 @@ class ModelInference:
         logger.info(f"{'='*50}")
         
         if not os.path.exists(encoders_dir):
-            logger.error(f" Encoders directory not found: {encoders_dir}")
+            logger.error(f"✗ Encoders directory not found: {encoders_dir}")
             raise FileNotFoundError(f"Encoders directory not found: {encoders_dir}")
         
         try:
@@ -176,13 +444,13 @@ class ModelInference:
                     encoder_data = json.load(f)
                     self.encoders[feature_name] = encoder_data
                     
-                logger.info(f"  Loaded encoder for '{feature_name}': {len(encoder_data)} mappings")
+                logger.info(f"  ✓ Loaded encoder for '{feature_name}': {len(encoder_data)} mappings")
             
-            logger.info(f" All encoders loaded successfully")
+            logger.info(f"✓ All encoders loaded successfully")
             logger.info(f"{'='*50}\n")
             
         except Exception as e:
-            logger.error(f" Failed to load encoders: {str(e)}")
+            logger.error(f"✗ Failed to load encoders: {str(e)}")
             raise
 
     def preprocess_input(self, data: Dict[str, Any]) -> pd.DataFrame:
@@ -204,30 +472,63 @@ class ModelInference:
         logger.info(f"{'='*50}")
         
         if not data or not isinstance(data, dict):
-            logger.error(" Input data must be a non-empty dictionary")
+            logger.error("✗ Input data must be a non-empty dictionary")
             raise ValueError("Input data must be a non-empty dictionary")
         
         try:
             # Convert to DataFrame
             df = pd.DataFrame([data])
-            logger.info(f" Input data converted to DataFrame: {df.shape}")
+            logger.info(f"✓ Input data converted to DataFrame: {df.shape}")
             logger.info(f"  • Input features: {list(df.columns)}")
             
-            # Apply encoders
+            # Apply encoders (only if data is not already encoded)
             if self.encoders:
-                logger.info("Applying feature encoders...")
+                logger.info("Checking if feature encoding is needed...")
+                
+                # Check if data is already encoded by looking at data types and values
+                already_encoded = True
                 for col, encoder in self.encoders.items():
                     if col in df.columns:
-                        original_value = df[col].iloc[0]
-                        # Use mapping with default for unknown values
-                        mapped = df[col].map(lambda val: encoder.get(str(val), None))
-                        if mapped.isnull().any():
-                            logger.warning(f"  ⚠ Unknown category encountered for '{col}', setting to -1 for unseen values")
-                        df[col] = mapped.fillna(-1).astype(int)
-                        encoded_value = df[col].iloc[0]
-                        logger.info(f"  ✓ Encoded '{col}': {original_value} → {encoded_value}")
-                    else:
-                        logger.warning(f"  ⚠ Column '{col}' not found in input data")
+                        value = df[col].iloc[0]
+                        # If value is numeric and within the range of encoded values, it's likely already encoded
+                        if isinstance(value, (int, float)):
+                            max_encoded_value = max(encoder.values()) if encoder else 0
+                            if 0 <= value <= max_encoded_value:
+                                continue  # This column looks already encoded
+                        # If value is a string that exists in encoder keys, it needs encoding
+                        elif isinstance(value, str) and value in encoder:
+                            already_encoded = False
+                            break
+                        # If value is not in encoder and not numeric, it's unknown but needs encoding
+                        elif not isinstance(value, (int, float)):
+                            already_encoded = False
+                            break
+                
+                if already_encoded:
+                    logger.info("✓ Data appears to be already encoded, skipping encoding step")
+                else:
+                    logger.info("Applying feature encoders...")
+                    for col, encoder in self.encoders.items():
+                        if col in df.columns:
+                            original_value = df[col].iloc[0]
+                            
+                            # Handle unknown values gracefully
+                            if original_value in encoder:
+                                encoded_value = encoder[original_value]
+                            else:
+                                # For unknown values, use the most common encoding (usually 0) or a default
+                                if isinstance(encoder, dict):
+                                    # Use the most frequent encoding (minimum value, which is usually the most common category)
+                                    encoded_value = min(encoder.values()) if encoder else 0
+                                    logger.warning(f"  ⚠ Unknown value '{original_value}' for '{col}', using default: {encoded_value}")
+                                else:
+                                    encoded_value = 0
+                                    logger.warning(f"  ⚠ Unknown value '{original_value}' for '{col}', using default: {encoded_value}")
+                            
+                            df[col] = encoded_value
+                            logger.info(f"  ✓ Encoded '{col}': {original_value} → {encoded_value}")
+                        else:
+                            logger.warning(f"  ⚠ Column '{col}' not found in input data")
             else:
                 logger.info("No encoders available - skipping encoding step")
 
@@ -239,7 +540,9 @@ class ModelInference:
                 ############### PANDAS CODES ###########################
                 # Create pandas-compatible binning logic for single records
                 def bin_credit_score(score):
-                    if score <= 580:
+                    if score is None or pd.isna(score):
+                        return "Unknown"
+                    elif score <= 580:
                         return "Poor"
                     elif score <= 669:
                         return "Fair"
@@ -258,9 +561,9 @@ class ModelInference:
                 # PySpark binning would be used for batch processing
                 
                 binned_score = df['CreditScoreBins'].iloc[0]
-                logger.info(f"   CreditScore binned: {original_score} → {binned_score}")
+                logger.info(f"  ✓ CreditScore binned: {original_score} → {binned_score}")
             else:
-                logger.warning("   CreditScore not found - skipping binning")
+                logger.warning("  ⚠ CreditScore not found - skipping binning")
 
             # Apply ordinal encoding
             if 'CreditScoreBins' in df.columns:
@@ -273,19 +576,25 @@ class ModelInference:
                     'Fair': 1, 
                     'Good': 2,
                     'Very Good': 3,
-                    'Excellent': 4
+                    'Excellent': 4,
+                    'Unknown': -1  # Handle unknown/missing values
                 }
                 original_value = df['CreditScoreBins'].iloc[0]
-                df['CreditScoreBins'] = df['CreditScoreBins'].map(ordinal_mapping)
+                
+                # Map with fallback for unknown values
+                def safe_ordinal_map(value):
+                    return ordinal_mapping.get(value, 2)  # Default to 'Good' if unknown
+                
+                df['CreditScoreBins'] = df['CreditScoreBins'].apply(safe_ordinal_map)
                 
                 ############### PYSPARK CODES ###########################
                 # Note: For single record inference, pandas mapping is more efficient
                 # PySpark ordinal encoding would be used for batch processing
                 
                 encoded_value = df['CreditScoreBins'].iloc[0]
-                logger.info(f"   CreditScoreBins encoded: {original_value} → {encoded_value}")
+                logger.info(f"  ✓ CreditScoreBins encoded: {original_value} → {encoded_value}")
             else:
-                logger.warning("   CreditScoreBins not found - skipping ordinal encoding")
+                logger.warning("  ⚠ CreditScoreBins not found - skipping ordinal encoding")
 
             # Drop unnecessary columns
             drop_columns = ['RowNumber', 'CustomerId', 'Firstname', 'Lastname']
@@ -295,47 +604,27 @@ class ModelInference:
                 df = df.drop(columns=existing_drop_columns)
                 logger.info(f"  ✓ Dropped columns: {existing_drop_columns}")
             
-            # Reorder columns to match training data (use expected_feature_names if available)
-            if hasattr(self, 'expected_feature_names') and self.expected_feature_names:
-                expected_columns = list(self.expected_feature_names)
-            else:
-                expected_columns = ['Age', 'Tenure', 'NumOfProducts', 'HasCrCard', 'IsActiveMember', 
-                                  'Geography', 'Gender', 'CreditScoreBins', 'Balance', 'EstimatedSalary']
-
-            # Add missing columns with sensible defaults
+            # Reorder columns to match training data
+            expected_columns = ['Age', 'Tenure', 'NumOfProducts', 'HasCrCard', 'IsActiveMember', 
+                              'Geography', 'Gender', 'CreditScoreBins', 'Balance', 'EstimatedSalary']
+            
+            # Check if all expected columns are present
             missing_columns = [col for col in expected_columns if col not in df.columns]
             if missing_columns:
-                logger.info(f" Filling missing expected columns with defaults: {missing_columns}")
-            for col in missing_columns:
-                if col.endswith('_outlier'):
-                    df[col] = 0
-                elif col.endswith('_index'):
-                    base = col.replace('_index', '')
-                    if base in df.columns:
-                        # if base exists and is numeric use it, otherwise try encoder mapping
-                        try:
-                            df[col] = df[base].astype(int)
-                        except Exception:
-                            # try encoder mapping
-                            enc = self.encoders.get(base, {})
-                            df[col] = df[base].map(lambda v: enc.get(str(v), -1)).astype(int)
-                    else:
-                        df[col] = -1
-                else:
-                    # numeric default
-                    df[col] = 0
-
-            # Ensure columns are in the exact order expected by the model
-            df = df[[col for col in expected_columns]]
-
-            logger.info(f" Preprocessing completed - Final shape: {df.shape}")
+                logger.warning(f"  ⚠ Missing columns: {missing_columns}")
+            
+            # Reorder columns to match training order
+            available_columns = [col for col in expected_columns if col in df.columns]
+            df = df[available_columns]
+            
+            logger.info(f"✓ Preprocessing completed - Final shape: {df.shape}")
             logger.info(f"  • Final features (reordered): {list(df.columns)}")
             logger.info(f"{'='*50}\n")
-
+            
             return df
             
         except Exception as e:
-            logger.error(f" Preprocessing failed: {str(e)}")
+            logger.error(f"✗ Preprocessing failed: {str(e)}")
             raise
     
     def predict(self, data: Dict[str, Any]) -> Dict[str, str]:
@@ -357,25 +646,49 @@ class ModelInference:
         logger.info(f"{'='*60}")
         
         if not data:
-            logger.error(" Input data cannot be empty")
+            logger.error("✗ Input data cannot be empty")
             raise ValueError("Input data cannot be empty")
         
         if self.model is None:
-            logger.error(" Model not loaded")
+            logger.error("✗ Model not loaded")
             raise ValueError("Model not loaded")
         
         try:
             # Preprocess input data
             processed_data = self.preprocess_input(data)
             
-            # Make prediction
+            # Make prediction based on model type
             logger.info("Generating predictions...")
-            y_pred = self.model.predict(processed_data)
-            y_proba = self.model.predict_proba(processed_data)[:, 1]
             
-            # Process results
-            prediction = int(y_pred[0])
-            probability = float(y_proba[0])
+            if hasattr(self, 'model_type') and self.model_type in ['pyspark', 'spark_mlflow', 'spark_s3']:
+                # PySpark model prediction
+                spark_df = self.spark.createDataFrame(processed_data)
+                predictions = self.model.transform(spark_df)
+                
+                # Get prediction and probability
+                prediction_row = predictions.select("prediction", "probability").collect()[0]
+                prediction = int(prediction_row.prediction)
+                
+                # Extract probability for positive class (index 1)
+                probability_vector = prediction_row.probability
+                probability = float(probability_vector[1])
+                
+            elif hasattr(self, 'model_type') and self.model_type == 'sklearn_s3':
+                # Scikit-learn model prediction (from S3 fallback)
+                logger.info("Using sklearn model for prediction...")
+                y_pred = self.model.predict(processed_data)
+                y_proba = self.model.predict_proba(processed_data)[:, 1]
+                
+                prediction = int(y_pred[0])
+                probability = float(y_proba[0])
+                
+            else:
+                # Default scikit-learn model prediction
+                y_pred = self.model.predict(processed_data)
+                y_proba = self.model.predict_proba(processed_data)[:, 1]
+                
+                prediction = int(y_pred[0])
+                probability = float(y_proba[0])
             
             status = 'Churn' if prediction == 1 else 'Retain'
             confidence = round(probability * 100, 2)
@@ -385,7 +698,7 @@ class ModelInference:
                 "Confidence": f"{confidence}%"
             }
             
-            logger.info(" Prediction completed:")
+            logger.info("✓ Prediction completed:")
             logger.info(f"  • Raw Prediction: {prediction}")
             logger.info(f"  • Raw Probability: {probability:.4f}")
             logger.info(f"  • Final Status: {status}")
@@ -395,5 +708,5 @@ class ModelInference:
             return result
             
         except Exception as e:
-            logger.error(f" Prediction failed: {str(e)}")
+            logger.error(f"✗ Prediction failed: {str(e)}")
             raise
