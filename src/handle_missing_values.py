@@ -15,7 +15,7 @@ from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql.types import StringType
 from pyspark.ml.feature import Imputer
-from src.spark_session import get_or_create_spark_session
+from utils.spark_session import get_or_create_spark_session
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -71,8 +71,8 @@ class DropMissingValuesStrategy(MissingValueHandlingStrategy):
             # df_cleaned = df.dropna(subset=self.critical_columns)
             
             ############### PYSPARK CODES ###########################
+            # Drop rows where any critical column has null
             df_cleaned = df.dropna(subset=self.critical_columns)
-
         else:
             # Drop rows with any null values
             df_cleaned = df.dropna()
@@ -84,12 +84,11 @@ class DropMissingValuesStrategy(MissingValueHandlingStrategy):
         ############### PYSPARK CODES ###########################
         final_count = df_cleaned.count()
         n_dropped = initial_count - final_count
-
-        logger.info(f" Dropped {n_dropped} rows with missing values")
+        
+        logger.info(f"✓ Dropped {n_dropped} rows with missing values")
         logger.info(f"  • Initial rows: {initial_count}")
         logger.info(f"  • Final rows: {final_count}")
-
-        # Return the cleaned DataFrame
+        
         return df_cleaned
 
 
@@ -147,10 +146,10 @@ class GenderImputer:
             
             # Validate prediction
             prediction = GenderPrediction(
-                                        firstname=firstname, 
-                                        lastname=lastname, 
-                                        pred_gender=predicted_gender
-                                        )
+                firstname=firstname, 
+                lastname=lastname, 
+                pred_gender=predicted_gender
+            )
             
             # Cache the result
             self._predictions_cache[cache_key] = prediction.pred_gender
@@ -182,20 +181,29 @@ class GenderImputer:
         #         df.loc[idx, 'Gender'] = gender
         
         ############### PYSPARK CODES ###########################
-        # Create a UDF (User Defined Functions) for gender prediction
+        # Create a UDF for gender prediction
         predict_gender_udf = F.udf(self._predict_gender, StringType())
-        missing_gender_df= df.filter(
-                    F.col('Gender').isNull() | (F.col('Gender') == '')
-                    ).select('Firstname', 'Lastname')
-
+        
+        # Identify rows with missing gender
+        missing_gender_df = df.filter(
+            F.col('Gender').isNull() | (F.col('Gender') == '')
+        ).select('Firstname', 'Lastname')
+        
         missing_count = missing_gender_df.count()
+        
+        if missing_count == 0:
+            logger.info("No missing gender values to impute")
+            return df
+        
         logger.info(f"Imputing {missing_count} missing gender values...")
-
+        
+        # Predict genders for missing values
         predictions_df = missing_gender_df.withColumn(
-                                                    'PredictedGender',
-                                                    predict_gender_udf(F.col('Firstname'), F.col('Lastname'))
-                                                    )
-
+            'PredictedGender',
+            predict_gender_udf(F.col('Firstname'), F.col('Lastname'))
+        )
+        
+        # Join predictions back to original dataframe
         df_with_predictions = df.join(
             predictions_df,
             on=['Firstname', 'Lastname'],
@@ -210,9 +218,10 @@ class GenderImputer:
                 F.col('PredictedGender')
             ).otherwise(F.col('Gender'))
         ).drop('PredictedGender')
-
-        return df_imputed
         
+        logger.info(f"✓ Gender imputation completed for {missing_count} rows")
+        
+        return df_imputed
 
 
 class FillMissingValuesStrategy(MissingValueHandlingStrategy):
@@ -269,8 +278,11 @@ class FillMissingValuesStrategy(MissingValueHandlingStrategy):
                 # df_filled = df.fillna({self.relevant_column: mean_value})
                 
                 ############### PYSPARK CODES ###########################
+                # Calculate mean for the column
                 mean_value = df.select(F.mean(F.col(self.relevant_column))).collect()[0][0]
                 df_filled = df.fillna({self.relevant_column: mean_value})
+                
+                logger.info(f'✓ Filled missing values in {self.relevant_column} with mean: {mean_value:.2f}')
                 
             elif self.method == 'median':
                 ############### PANDAS CODES ###########################
@@ -278,9 +290,11 @@ class FillMissingValuesStrategy(MissingValueHandlingStrategy):
                 # df_filled = df.fillna({self.relevant_column: median_value})
                 
                 ############### PYSPARK CODES ###########################
+                # Calculate median for the column
                 median_value = df.approxQuantile(self.relevant_column, [0.5], 0.01)[0]
                 df_filled = df.fillna({self.relevant_column: median_value})
                 
+                logger.info(f'✓ Filled missing values in {self.relevant_column} with median: {median_value:.2f}')
                 
             elif self.method == 'mode':
                 ############### PANDAS CODES ###########################
@@ -288,12 +302,16 @@ class FillMissingValuesStrategy(MissingValueHandlingStrategy):
                 # df_filled = df.fillna({self.relevant_column: mode_value})
                 
                 ############### PYSPARK CODES ###########################
-                mode_value = df.groupBy(self.relevant_column).count().orderBy(F.desc('count')).first()[0]
+                # Calculate mode for the column
+                mode_value = df.groupBy(self.relevant_column).count() \
+                    .orderBy(F.desc('count')).first()[0]
                 df_filled = df.fillna({self.relevant_column: mode_value})
+                
+                logger.info(f'✓ Filled missing values in {self.relevant_column} with mode: {mode_value}')
                 
             elif self.method == 'constant' and self.fill_value is not None:
                 df_filled = df.fillna({self.relevant_column: self.fill_value})
-                logger.info(f' Filled missing values in {self.relevant_column} with constant: {self.fill_value}')
+                logger.info(f'✓ Filled missing values in {self.relevant_column} with constant: {self.fill_value}')
                 
             else:
                 raise ValueError(f"Invalid method '{self.method}' or missing fill_value")
@@ -302,7 +320,7 @@ class FillMissingValuesStrategy(MissingValueHandlingStrategy):
             # Fill all columns based on method
             if self.method == 'constant' and self.fill_value is not None:
                 df_filled = df.fillna(self.fill_value)
-                logger.info(f' Filled all missing values with constant: {self.fill_value}')
+                logger.info(f'✓ Filled all missing values with constant: {self.fill_value}')
             else:
                 # Use Spark ML Imputer for mean/median on all numeric columns
                 numeric_cols = [field.name for field in df.schema.fields 
@@ -324,7 +342,7 @@ class FillMissingValuesStrategy(MissingValueHandlingStrategy):
                             .drop(f"{col}_imputed")
                     
                     df_filled = df_imputed
-                    logger.info(f' Filled missing values in numeric columns using {self.method}')
+                    logger.info(f'✓ Filled missing values in numeric columns using {self.method}')
                 else:
                     df_filled = df
                     logger.warning('No numeric columns found for imputation')

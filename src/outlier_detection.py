@@ -10,7 +10,7 @@ import pandas as pd  # Keep for educational comparison
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql.types import BooleanType
-from src.spark_session import get_or_create_spark_session
+from utils.spark_session import get_or_create_spark_session
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -86,21 +86,19 @@ class IQROutlierDetection(OutlierDetectionStrategy):
             # Q3 = df[col].quantile(0.75)
             # IQR = Q3 - Q1
             
-            # lower_bound = Q1 - self.threshold * IQR
-            # upper_bound = Q3 + self.threshold * IQR
-            
-            # bounds[col] = (lower_bound, upper_bound)
-
             ############### PYSPARK CODES ###########################
-            # Use the current column name for quantile calculation
+            # Calculate Q1 and Q3 using approxQuantile
             quantiles = df.approxQuantile(col, [0.25, 0.75], 0.01)
             Q1, Q3 = quantiles[0], quantiles[1]
             IQR = Q3 - Q1
-
+            
             lower_bound = Q1 - self.threshold * IQR
             upper_bound = Q3 + self.threshold * IQR
             
             bounds[col] = (lower_bound, upper_bound)
+            
+            logger.info(f"  Column '{col}': Q1={Q1:.2f}, Q3={Q3:.2f}, IQR={IQR:.2f}")
+            logger.info(f"  Bounds: [{lower_bound:.2f}, {upper_bound:.2f}]")
         
         return bounds
     
@@ -148,16 +146,21 @@ class IQROutlierDetection(OutlierDetectionStrategy):
             
             ############### PYSPARK CODES ###########################
             result_df = result_df.withColumn(
-                                            outlier_col,
-                                            (F.col(col) < lower_bound) | (F.col(col) > upper_bound)
-                                            )
-
+                outlier_col,
+                (F.col(col) < lower_bound) | (F.col(col) > upper_bound)
+            )
+            
+            # Count outliers
             outlier_count = result_df.filter(F.col(outlier_col)).count()
-            total_rows = df.count()
-
+            total_rows = result_df.count()
+            
+            outlier_percentage = (outlier_count / total_rows * 100) if total_rows > 0 else 0
+            
+            logger.info(f"  ✓ Found {outlier_count} outliers ({outlier_percentage:.2f}%)")
+            total_outliers += outlier_count
         
         logger.info(f"\n{'='*60}")
-        logger.info(f' OUTLIER DETECTION COMPLETE - Total outlier instances: {total_outliers}')
+        logger.info(f'✓ OUTLIER DETECTION COMPLETE - Total outlier instances: {total_outliers}')
         logger.info(f"{'='*60}\n")
         
         return result_df
@@ -228,37 +231,50 @@ class OutlierDetector:
             # cleaned_df = df[~rows_to_remove]
             
             ############### PYSPARK CODES ###########################
-            outlier_count_expr = sum(F.col(col).cast('int') for col in outlier_columns)
-            df_with_count = df_with_outliers.withColumn('outlier_count', outlier_count_expr)
-            clean_df = df_with_count.filter(F.col("outlier_count") < min_outliers)
-            clean_df = clean_df.drop("outlier_count")
+            # Create expression to count outliers
+            outlier_count_expr = sum(F.col(col).cast("int") for col in outlier_columns)
+            
+            # Add outlier count column
+            df_with_count = df_with_outliers.withColumn("outlier_count", outlier_count_expr)
+            
+            # Filter rows with fewer outliers than threshold
+            cleaned_df = df_with_count.filter(F.col("outlier_count") < min_outliers)
+            
+            # Remove temporary columns
+            cleaned_df = cleaned_df.drop("outlier_count")
+            for col in outlier_columns:
+                cleaned_df = cleaned_df.drop(col)
             
             ############### PANDAS CODES ###########################
             # rows_removed = rows_to_remove.sum()
             
             ############### PYSPARK CODES ###########################
-            rows_removed = initial_rows - clean_df.count()
+            rows_removed = initial_rows - cleaned_df.count()
+            removal_percentage = (rows_removed / initial_rows * 100) if initial_rows > 0 else 0
+            
+            logger.info(f"✓ Removed {rows_removed} rows with {min_outliers}+ outliers ({removal_percentage:.2f}%)")
+            logger.info(f"✓ Remaining rows: {cleaned_df.count()} ({(cleaned_df.count()/initial_rows*100):.2f}%)")
             
         elif method == 'cap':
+            # Cap outliers at bounds
             bounds = self._strategy.get_outlier_bounds(df, selected_columns)
-            clean_df = df
-
+            cleaned_df = df
+            
             for col in selected_columns:
-                lb, ub = bounds[col]
-
-                clean_df = clean_df.withColumn(
-                                            col,
-                                            F.when(F.col(col) < lb, lb)
-                                            .when(F.col(col) > ub, ub)
-                                            .otherwise(F.col(col))
-                                            )
+                lower_bound, upper_bound = bounds[col]
+                
+                # Cap values at bounds
+                cleaned_df = cleaned_df.withColumn(
+                    col,
+                    F.when(F.col(col) < lower_bound, lower_bound)
+                    .when(F.col(col) > upper_bound, upper_bound)
+                    .otherwise(F.col(col))
+                )
+                
+            logger.info(f"✓ Capped outliers at IQR bounds for {len(selected_columns)} columns")
             
         else:
             raise ValueError(f"Unknown outlier handling method: {method}")
         
         logger.info(f"{'='*60}\n")
-        # Return the cleaned DataFrame (named `clean_df` above)
-        return clean_df
-    
-
-
+        return cleaned_df
