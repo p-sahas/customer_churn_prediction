@@ -18,62 +18,60 @@ all: help
 
 # Help target
 help:
-	@echo " Production ML System with Kafka Streaming"
-	@echo "============================================="
+	@echo "🚀 Production ML Pipeline System"
+	@echo "================================="
 	@echo ""
-	@echo " Setup Commands:"
+	@echo "📦 Setup Commands:"
 	@echo "  make install             - Install project dependencies and set up environment"
 	@echo "  make setup-dirs          - Create necessary directories for pipelines"
-	@echo "  make clean               - Clean up artifacts"
+	@echo "  make clean               - Clean up local cache only (safe)"
+	@echo "  make clean-local-artifacts - Remove legacy local artifact folders"
 	@echo ""
-	@echo " ML Pipeline Commands:"
-	@echo "  make data-pipeline       - Run the data pipeline"
-	@echo "  make train-pipeline      - Run the training pipeline (PySpark MLlib)"
-	@echo "  make batch-inference     - Run the batch inference pipeline"
+	@echo "🐳 Docker Commands:"
+	@echo "  make docker-build        - Build all Docker images"
+	@echo "  make docker-up           - Start all Docker services"
+	@echo "  make docker-down         - Stop all Docker services"
+	@echo "  make docker-data-pipeline    - Run data pipeline in Docker"
+	@echo "  make docker-model-pipeline   - Run model pipeline in Docker"
+	@echo "  make docker-inference-pipeline - Run inference pipeline in Docker"
+	@echo "  make docker-run-all      - Run all pipelines in Docker"
+	@echo "  make docker-status       - Show Docker service status"
 	@echo ""
-	@echo " MLflow Commands:"
+	@echo "🔄 ML Pipeline Commands (Local):"
+	@echo "  make data-pipeline       - Run the data preprocessing pipeline"
+	@echo "  make train-pipeline      - Run the model training pipeline"
+	@echo "  make inference-pipeline  - Run the batch inference pipeline"
+	@echo ""
+	@echo "📊 MLflow Commands:"
 	@echo "  make mlflow-ui           - Launch MLflow UI (port $(MLFLOW_PORT))"
-	@echo "  make stop-all            - Stop all MLflow servers"
+	@echo "  make stop-mlflow         - Stop MLflow servers"
 	@echo ""
-	@echo " Kafka Streaming Commands:"
-	@echo "  make kafka-install       - Install Kafka natively (first time)"
-	@echo "  make kafka-validate      - Validate Kafka installation"
-	@echo "  make kafka-format        - Format Kafka storage (first time)"
-	@echo "  make kafka-start         - Start native Kafka broker"
-	@echo "  make kafka-topics        - Create churn prediction topic"
-	@echo "  make kafka-cleanup-topics - Remove unused topics"
+	@echo "🌐 S3 Commands:"
+	@echo "  make s3-upload-data              - Upload data/raw & data/processed to S3 (one-time)"
+	@echo "  make s3-list PREFIX=<prefix>     - List S3 keys with prefix"
+	@echo "  make s3-clean                    - Clean project S3 artifacts (safe)"
+	@echo "  make s3-delete-prefix PREFIX=<>  - Delete S3 keys with prefix (careful!)"
+	@echo "  make s3-smoke                    - Test S3 connectivity"
 	@echo ""
-	@echo " Data Production Commands:"
-	@echo "  make kafka-producer-stream - Stream events (1/sec for 5 mins)"
-	@echo "  make kafka-producer-batch  - Batch produce events"
+	@echo "🧪 Development Commands:"
+	@echo "  make status              - Show project and S3 status"
+	@echo "  make dev-install         - Install with development dependencies"
 	@echo ""
-	@echo " ML Processing Commands:"
-	@echo "  make kafka-consumer        - Batch ML consumer (process all messages)"
-	@echo "  make kafka-consumer-continuous - Continuous ML consumer (real-time)"
+	@echo "💡 Quick Start (Docker):"
+	@echo "  1. Configure AWS credentials (~/.aws/credentials)"
+	@echo "  2. cp .env.example .env && edit .env"
+	@echo "  3. make docker-build"
+	@echo "  4. make docker-up"
+	@echo "  5. make docker-run-all"
 	@echo ""
-	@echo " Monitoring Commands:"
-	@echo "  make kafka-check         - Check broker status"
-	@echo "  make kafka-monitor       - Monitor cluster health"
-	@echo "  make kafka-help          - Show all Kafka commands"
-	@echo ""
-	@echo " Airflow Orchestration Commands:"
-	@echo "  make airflow-init        - Initialize Apache Airflow"
-	@echo "  make airflow-start       - Start Airflow in standalone mode"
-	@echo "  make airflow-kill        - Kill all Airflow processes"
-	@echo "  make airflow-reset       - Reset Airflow database"
-	@echo "  make clean-kill          - Kill all processes and clean logs/data"
-	@echo ""
-	@echo " Quick Start (Batch Processing):"
-	@echo "  1. make install && make setup-dirs"
-	@echo "  2. make kafka-start-bg && make kafka-topics"
-	@echo "  3. make kafka-producer-batch"
-	@echo "  4. make kafka-consumer"
-	@echo ""
-	@echo " Real-time Streaming Demo:"
-	@echo "  1. Terminal 1: make kafka-consumer-continuous"
-	@echo "  2. Terminal 2: make kafka-producer-stream"
-	@echo "  3. Watch real-time ML processing!"
-	@echo "  4. Terminal 3: make kafka-sample-scored (view analytics)"
+	@echo "💡 Quick Start (Local):"
+	@echo "  1. make install"
+	@echo "  2. Configure AWS settings in config.yaml (aws section)"
+	@echo "  3. make s3-smoke"
+	@echo "  4. make s3-upload-data (one-time setup)"
+	@echo "  5. make data-pipeline"
+	@echo "  6. make train-pipeline"
+	@echo "  7. make inference-pipeline"
 
 # ========================================================================================
 # SETUP AND ENVIRONMENT COMMANDS
@@ -81,609 +79,248 @@ help:
 
 # Install project dependencies and set up environment
 install:
-	@echo " Installing project dependencies and setting up environment..."
+	@echo "📦 Installing project dependencies and setting up environment..."
 	@echo "Creating virtual environment..."
 	@python3 -m venv .venv
 	@echo "Activating virtual environment and installing dependencies..."
 	@source .venv/bin/activate && pip install --upgrade pip
 	@source .venv/bin/activate && pip install -r requirements.txt
-	@echo " Installation completed successfully!"
+	@echo "✅ Installation completed successfully!"
 	@echo "To activate the virtual environment, run: source .venv/bin/activate"
 
 # Create necessary directories
 setup-dirs:
-	@echo " Creating necessary directories..."
-	@mkdir -p artifacts/data artifacts/models artifacts/encode
-	@mkdir -p artifacts/mlflow_run_artifacts artifacts/mlflow_training_artifacts
-	@mkdir -p artifacts/inference_batches
-	@mkdir -p data/processed data/raw runtime/kafka-logs runtime/pids
-	@echo " Directories created successfully!"
+	@echo "📁 Creating necessary directories..."
+	@mkdir -p data/raw
+	@echo "✅ Directories created successfully!"
+	@echo "ℹ️  Note: Artifacts are now stored in S3, no local artifact directories needed"
 
-# Clean up
+# Clean up local cache only (safe cleanup)
 clean:
-	@echo " Cleaning up artifacts..."
-	rm -rf artifacts/* mlruns
-	@echo " Cleanup completed!"
-
-# ========================================================================================
-# ML PIPELINE COMMANDS (PySpark MLlib Only)
-# ========================================================================================
-
-# Run data pipeline
-data-pipeline: setup-dirs
-	@echo " Start running data pipeline..."
-	@source $(VENV) && $(PYTHON) pipelines/data_pipeline.py
-	@echo " Data pipeline completed successfully!"
-
-# Run training pipeline (PySpark MLlib)
-train-pipeline: setup-dirs
-	@echo " Running PySpark MLlib training pipeline..."
-	@source $(VENV) && $(PYTHON) pipelines/training_pipeline.py
-	@echo " Training pipeline completed successfully!"
-
-# Run streaming inference pipeline
-batch-inference: setup-dirs
-	@echo " Running batch inference pipeline..."
-	@source $(VENV) && $(PYTHON) pipelines/batch_inference_pipeline.py
-	@echo " Batch inference completed successfully!"
-
-# Comprehensive cleanup and kill command
-clean-kill:
-	@echo " Comprehensive cleanup and kill operation..."
-	@echo "=============================================="
-	@echo "  This will kill all processes and remove logs/data (NOT code)"
-	@read -p "Continue? (y/N): " confirm && [ "$$confirm" = "y" ] || exit 1
-	@echo ""
-	@echo " Killing all processes..."
-	@pkill -f kafka || echo "No Kafka processes found"
-	@pkill -f airflow || echo "No Airflow processes found"
-	@pkill -f mlflow || echo "No MLflow processes found"
-	@pkill -f spark || echo "No Spark processes found"
-	@pkill -f java.*kafka || echo "No Java Kafka processes found"
-	@echo ""
-	@echo "  Removing logs and data directories..."
-	@rm -rf runtime/kafka-logs/ || echo "Kafka logs not found"
-	@rm -rf runtime/pids/ || echo "PID files not found"
-	@rm -rf runtime/kafka.log || echo "Kafka log file not found"
-	@echo "  Completely removing Airflow directory (clears all execution history)..."
-	@rm -rf .airflow/ || echo "Airflow directory not found"
-	@rm -rf mlruns/ || echo "MLflow runs not found"
-	@rm -rf artifacts/mlflow_*/ || echo "MLflow artifacts not found"
-	@rm -rf artifacts/data/streaming_checkpoints/ || echo "Streaming checkpoints not found"
+	@echo "🧹 Cleaning up local cache and temporary files..."
+	@rm -rf mlruns  # MLflow now uses S3 backend
 	@find . -path "./.venv" -prune -o -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
 	@find . -path "./.venv" -prune -o -name "*.pyc" -delete 2>/dev/null || true
+	@echo "✅ Local cleanup completed!"
+	@echo "ℹ️  All artifacts are now stored in S3. Use 'make s3-clean' to clean S3 artifacts."
+
+# Clean up S3 artifacts (project-specific only)
+s3-clean:
+	@echo "🗑️ Cleaning S3 ML pipeline artifacts..."
+	@echo "⚠️ This will delete project artifacts from S3:"
+	@echo "   • artifacts/data_artifacts/"
+	@echo "   • artifacts/model_artifacts/"
+	@echo "   • artifacts/inference_artifacts/"
+	@echo "   • test/ (if exists)"
+	@read -p "Continue? (y/N): " confirm && [ "$$confirm" = "y" ] || exit 1
 	@echo ""
-	@echo " Freeing up ports..."
-	@lsof -ti:5000,8080,8793,8794,9092,9093 | xargs kill -9 2>/dev/null || echo "No processes using ML/Kafka ports"
+	@echo "🗑️ Deleting data artifacts..."
+	@aws s3 rm s3://customer-churn-prediction-sahas-0200/artifacts/data_artifacts/ --recursive 2>/dev/null || echo "No data artifacts found"
+	@echo "🗑️ Deleting model artifacts..."
+	@aws s3 rm s3://customer-churn-prediction-sahas-0200/artifacts/model_artifacts/ --recursive 2>/dev/null || echo "No model artifacts found"
+	@echo "🗑️ Deleting inference artifacts..."
+	@aws s3 rm s3://customer-churn-prediction-sahas-0200/artifacts/inference_artifacts/ --recursive 2>/dev/null || echo "No inference artifacts found"
+	@echo "🗑️ Deleting test artifacts..."
+	@aws s3 rm s3://customer-churn-prediction-sahas-0200/test/ --recursive 2>/dev/null || echo "No test artifacts found"
+	@echo "✅ S3 artifacts cleaned!"
+
+# Remove legacy local artifact folders (since we're S3-only now)
+clean-local-artifacts:
+	@echo "🗑️  Removing legacy local artifact folders..."
+	@echo "⚠️ This will permanently delete local folders:"
+	@echo "   • artifacts/ (all local ML artifacts)"
+	@echo "   • data/processed/ (processed data now in S3)"
+	@echo "   • mlruns/ (MLflow now uses S3 backend)"
+	@echo "   • test_*.py (test files)"
+	@read -p "Continue? (y/N): " confirm && [ "$$confirm" = "y" ] || exit 1
+	@rm -rf artifacts/
+	@rm -rf data/processed/
+	@rm -rf mlruns/
+	@rm -f test_*.py
+	@echo "✅ Legacy local artifacts removed - pipeline now uses S3-only!"
+
+# ========================================================================================
+# DOCKER COMMANDS
+# ========================================================================================
+
+# Build all Docker images
+docker-build:
+	@echo "🐳 Building all Docker images..."
+	@docker-compose build --no-cache
+	@echo "✅ All Docker images built successfully!"
+
+# Start MLflow tracking server
+docker-mlflow:
+	@echo "🚀 Starting MLflow Tracking Server..."
+	@docker-compose up -d mlflow-tracking
+	@echo "✅ MLflow Tracking Server started at http://localhost:5001"
+
+# Start all services
+docker-up:
+	@echo "🐳 Starting all Docker services..."
+	@docker-compose up -d mlflow-tracking data-pipeline model-pipeline inference-pipeline
+	@echo "✅ All Docker services started!"
+	@echo "🌐 MLflow UI: http://localhost:5001"
+
+# Stop all services
+docker-down:
+	@echo "🛑 Stopping all Docker services..."
+	@docker-compose down
+	@echo "✅ All Docker services stopped!"
+
+# Clean up Docker resources
+docker-clean:
+	@echo "🧹 Cleaning up Docker resources..."
+	@docker-compose down -v --remove-orphans
+	@docker system prune -f
+	@echo "✅ Docker cleanup completed!"
+
+# Run data pipeline in Docker
+docker-data-pipeline:
+	@echo "🔄 Running data pipeline in Docker..."
+	@docker-compose run --rm data-pipeline
+	@echo "✅ Data pipeline completed!"
+
+# Run model pipeline in Docker
+docker-model-pipeline:
+	@echo "🎯 Running model pipeline in Docker..."
+	@docker-compose run --rm model-pipeline
+	@echo "✅ Model pipeline completed!"
+
+# Run inference pipeline in Docker
+docker-inference-pipeline:
+	@echo "🔮 Running inference pipeline in Docker..."
+	@docker-compose run --rm inference-pipeline
+	@echo "✅ Inference pipeline completed!"
+
+# Run all pipelines in sequence (Docker)
+docker-run-all: docker-mlflow
+	@echo "🚀 Running all pipelines in Docker..."
+	@sleep 10  # Wait for MLflow to be ready
+	@docker-compose run --rm data-pipeline
+	@docker-compose run --rm model-pipeline
+	@docker-compose run --rm inference-pipeline
+	@echo "🎉 All Docker pipelines completed!"
+
+# Show Docker service status
+docker-status:
+	@echo "📊 Docker Service Status"
+	@echo "======================="
+	@docker-compose ps
 	@echo ""
-	@echo " Cleanup completed successfully!"
-	@echo "Ready for fresh start with: make setup"
+	@echo "🌐 MLflow UI: http://localhost:5001"
+
+# View Docker logs
+docker-logs:
+	@echo "📋 Docker Service Logs"
+	@echo "======================"
+	@docker-compose logs --tail=50 -f
+
+# ========================================================================================
+# ML PIPELINE COMMANDS (Local)
+# ========================================================================================
+
+# Run data preprocessing pipeline
+data-pipeline: setup-dirs
+	@echo "🔄 Running data preprocessing pipeline..."
+	@./run_local.sh python pipelines/data_pipeline.py
+	@echo "✅ Data pipeline completed successfully!"
+
+# Run model training pipeline
+train-pipeline: setup-dirs
+	@echo "🎯 Running model training pipeline..."
+	@./run_local.sh python pipelines/training_pipeline.py
+	@echo "✅ Training pipeline completed successfully!"
+
+# Run batch inference pipeline
+inference-pipeline: setup-dirs
+	@echo "🔮 Running batch inference pipeline..."
+	@./run_local.sh python pipelines/inference_pipeline.py
+	@echo "✅ Inference pipeline completed successfully!"
+
+# Run all pipelines in sequence
+run-all: data-pipeline train-pipeline inference-pipeline
+	@echo "🎉 All pipelines completed successfully!"
 
 # ========================================================================================
 # MLFLOW COMMANDS
 # ========================================================================================
 
+# Launch MLflow UI
 mlflow-ui:
-	@echo " Launching MLflow UI..."
+	@echo "📊 Launching MLflow UI..."
 	@echo "MLflow UI will be available at: http://localhost:$(MLFLOW_PORT)"
 	@echo "Press Ctrl+C to stop the server"
 	@source $(VENV) && mlflow ui --host 0.0.0.0 --port $(MLFLOW_PORT)
 
-# Stop all running MLflow servers
-stop-all:
-	@echo " Stopping all MLflow servers..."
-	@echo "Finding MLflow processes on port $(MLFLOW_PORT)..."
+# Stop MLflow servers
+stop-mlflow:
+	@echo "🛑 Stopping MLflow servers..."
 	@-lsof -ti:$(MLFLOW_PORT) | xargs kill -9 2>/dev/null || true
-	@echo "Finding other MLflow UI processes..."
 	@-ps aux | grep '[m]lflow ui' | awk '{print $$2}' | xargs kill -9 2>/dev/null || true
-	@-ps aux | grep '[g]unicorn.*mlflow' | awk '{print $$2}' | xargs kill -9 2>/dev/null || true
-	@echo " All MLflow servers have been stopped"
+	@echo "✅ MLflow servers stopped"
 
 # ========================================================================================
-# NATIVE KAFKA STREAMING COMMANDS
+# S3 UTILITY COMMANDS
 # ========================================================================================
 
-# Configuration
+# List S3 keys with prefix
+s3-list:
+	@echo "📋 Listing S3 keys..."
+	@if [ -z "$(PREFIX)" ]; then echo "❌ Usage: make s3-list PREFIX=your-prefix"; exit 1; fi
+	@aws s3 ls s3://customer-churn-prediction-sahas-0200/$(PREFIX) --recursive
 
-#KAFKA_CONF := kafka/server.properties
+# Delete specific S3 keys with prefix (use with caution)
+s3-delete-prefix:
+	@echo "🗑️ Deleting S3 keys with prefix: $(PREFIX)"
+	@echo "⚠️ This will permanently delete data!"
+	@read -p "Continue? (y/N): " confirm && [ "$$confirm" = "y" ] || exit 1
+	@./run_local.sh python -c "from utils.s3_io import list_keys, delete_key; keys = list_keys('$(PREFIX)'); [delete_key(k) for k in keys]; print(f'Deleted {len(keys)} keys')"
 
-# KAFKA_CONF := config/kraft/server.properties
-
-# KAFKA_LOG_DIR := runtime/kafka-logs
-# PID_DIR := runtime/pids
-
-# kafka-format:
-# 	@echo "🔧 Formatting native Kafka storage (KRaft mode)..."
-# 	@if [ -z "$$KAFKA_HOME" ]; then \
-# 		echo " KAFKA_HOME not set. Please install Kafka natively and set KAFKA_HOME"; \
-# 		echo " Installation guide: README_KAFKA.md"; \
-# 		exit 1; \
-# 	fi
-# 	@echo " Creating runtime directories..."
-# 	@mkdir -p runtime/kafka-logs runtime/pids
-# 	@echo " Generating cluster UUID..."
-# 	@CLUSTER_ID=$$($${KAFKA_HOME}/bin/kafka-storage.sh random-uuid); \
-# 	echo "Using Cluster ID: $$CLUSTER_ID"; \
-# 	$${KAFKA_HOME}/bin/kafka-storage.sh format -t $$CLUSTER_ID -c "$(KAFKA_CONF)"
-# 	@echo " Native Kafka storage formatted successfully"
-
-# kafka-start-bg:
-# 	@echo " Starting native Kafka broker in background..."
-# 	@if [ -z "$$KAFKA_HOME" ]; then \
-# 		echo "❌ KAFKA_HOME not set"; \
-# 		exit 1; \
-# 	fi
-# 	@mkdir -p $(PID_DIR)
-# 	@nohup $${KAFKA_HOME}/bin/kafka-server-start.sh "$(KAFKA_CONF)" > runtime/kafka.log 2>&1 & \
-# 	echo $$! > $(PID_DIR)/kafka.pid
-# 	@echo "✅ Kafka broker started in background (PID: $$(cat $(PID_DIR)/kafka.pid))"
-# 	@echo "📄 Logs: runtime/kafka.log"
-
-# kafka-stop:
-# 	@echo " Stopping native Kafka broker..."
-# 	@if [ -z "$$KAFKA_HOME" ]; then \
-# 		echo "❌ KAFKA_HOME not set"; \
-# 		exit 1; \
-# 	fi
-# 	@if [ -f "$(PID_DIR)/kafka.pid" ]; then \
-# 		PID=$$(cat $(PID_DIR)/kafka.pid); \
-# 		echo "🔍 Found Kafka PID: $$PID"; \
-# 		kill $$PID || true; \
-# 		rm -f $(PID_DIR)/kafka.pid; \
-# 		echo "✅ Kafka broker stopped"; \
-# 	else \
-# 		echo "⚠️ PID file not found, trying graceful shutdown..."; \
-# 		$${KAFKA_HOME}/bin/kafka-server-stop.sh || true; \
-# 	fi
-
-# kafka-topics:
-# 	@echo " Creating churn prediction topics on native broker..."
-# 	@if ! kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then \
-# 		echo "❌ Cannot connect to native Kafka broker at localhost:9092"; \
-# 		echo " Please start broker with 'make kafka-start' in another terminal"; \
-# 		exit 1; \
-# 	fi
-# 	@echo " Creating churn_predictions topic..."
-# 	@kafka-topics.sh --bootstrap-server localhost:9092 --create --topic churn_predictions --partitions 1 --replication-factor 1 --if-not-exists
-# 	@echo " Creating churn_predictions_scored topic..."
-# 	@kafka-topics.sh --bootstrap-server localhost:9092 --create --topic churn_predictions_scored --partitions 1 --replication-factor 1 --if-not-exists
-# 	@echo "✅ Churn predictions topics created successfully"
-# 	@echo " Current topics on native broker:"
-# 	@kafka-topics.sh --bootstrap-server localhost:9092 --list
-
-# kafka-producer-stream:
-# 	@echo " Starting Kafka streaming producer (real data sampling)..."
-# 	@if ! kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then \
-# 		echo "❌ Cannot connect to native Kafka broker"; \
-# 		echo " Please start broker with 'make kafka-start'"; \
-# 		exit 1; \
-# 	fi
-# 	@echo " Streaming real customer events to localhost:9092 (1 event/sec for 5 mins)"
-# 	@source $(VENV) && python pipelines/kafka_producer.py --mode streaming --rate 1 --duration 300
-
-
-# kafka-producer-batch:
-# 	@echo " Starting Kafka batch producer (real data sampling)..."
-# 	@if ! kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then \
-# 		echo "❌ Cannot connect to native Kafka broker"; \
-# 		echo " Please start broker with 'make kafka-start'"; \
-# 		exit 1; \
-# 	fi
-# 	@echo "📊 Batch processing 100 real customer events to localhost:9092"
-# 	@source $(VENV) && python pipelines/kafka_producer.py --mode batch --num-events 100
-
-# kafka-consumer:
-# 	@echo " Starting Kafka batch consumer with ML predictions..."
-# 	@if ! kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then \
-# 		echo "❌ Cannot connect to native Kafka broker"; \
-# 		echo " Please start broker with 'make kafka-start'"; \
-# 		exit 1; \
-# 	fi
-# 	@echo " Processing messages in batches with ML predictions"
-# 	@source $(VENV) && python pipelines/kafka_batch_consumer.py
-
-# kafka-consumer-continuous:
-# 	@echo " Starting continuous Kafka consumer monitoring..."
-# 	@echo " Monitoring for NEW messages (real-time ML processing)"
-# 	@echo " Press Ctrl+C to stop monitoring"
-# 	@source $(VENV) && python pipelines/kafka_batch_consumer.py --continuous --poll-interval 5
-	
-# kafka-check:
-# 	@echo " Checking native Kafka broker status..."
-# 	@if kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then \
-# 		echo "✅ Native Kafka broker is running at localhost:9092"; \
-# 		echo " Available topics:"; \
-# 		kafka-topics.sh --bootstrap-server localhost:9092 --list; \
-# 		echo " Broker information:"; \
-# 		kafka-broker-api-versions.sh --bootstrap-server localhost:9092 | head -1; \
-# 	else \
-# 		echo "❌ Cannot connect to native Kafka broker at localhost:9092"; \
-# 		echo " Please start with 'make kafka-start' in another terminal"; \
-# 		echo " Or check installation with 'make kafka-validate'"; \
-# 	fi
-	
-# kafka-sample-scored:
-# 	@echo " Analyzing churn prediction results..."
-# 	@if kafka-topics.sh --bootstrap-server localhost:9092 --list | grep -q churn_predictions_scored; then \
-# 		source $(VENV) && python scripts/kafka_analytics.py; \
-# 	else \
-# 		echo "❌ churn_predictions_scored topic not found. Run 'make kafka-topics' first."; \
-# 	fi
-
-# kafka-cleanup-topics:
-# 	@echo " Cleaning up unused Kafka topics..."
-# 	@if ! kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then \
-# 		echo "❌ Cannot connect to native Kafka broker"; \
-# 		echo " Please start broker with 'make kafka-start'"; \
-# 		exit 1; \
-# 	fi
-# 	@echo "Removing unused topics (keeping only churn_predictions)..."
-# 	@for topic in customer_events model_updates data_quality_alerts; do \
-# 		if kafka-topics.sh --bootstrap-server localhost:9092 --list | grep -q "$$topic"; then \
-# 			echo " Deleting topic: $$topic"; \
-# 			kafka-topics.sh --bootstrap-server localhost:9092 --delete --topic "$$topic"; \
-# 		else \
-# 			echo "✅ Topic $$topic not found (already clean)"; \
-# 		fi; \
-# 	done
-# 	@echo "✅ Topic cleanup completed"
-# 	@echo " Remaining topics:"
-# 	@kafka-topics.sh --bootstrap-server localhost:9092 --list
-
-# kafka-flush-messages:
-# 	@echo " Flushing all messages from Kafka topics..."
-# 	@if ! kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then \
-# 		echo "❌ Cannot connect to native Kafka broker"; \
-# 		echo " Please start broker with 'make kafka-start'"; \
-# 		exit 1; \
-# 	fi
-# 	@echo "Deleting and recreating topics to flush all messages..."
-# 	@kafka-topics.sh --bootstrap-server localhost:9092 --delete --topic churn_predictions 2>/dev/null || echo "Topic churn_predictions not found"
-# 	@kafka-topics.sh --bootstrap-server localhost:9092 --delete --topic churn_predictions_scored 2>/dev/null || echo "Topic churn_predictions_scored not found"
-# 	@sleep 2
-# 	@echo "🔮 Creating churn_predictions topic..."
-# 	@kafka-topics.sh --bootstrap-server localhost:9092 --create --topic churn_predictions --partitions 1 --replication-factor 1
-# 	@echo "🔮 Creating churn_predictions_scored topic..."
-# 	@kafka-topics.sh --bootstrap-server localhost:9092 --create --topic churn_predictions_scored --partitions 1 --replication-factor 1
-# 	@echo "✅ All messages flushed - topics are now empty"
-# 	@echo " Current topics:"
-# 	@kafka-topics.sh --bootstrap-server localhost:9092 --list
-
-# kafka-reset:
-# 	@echo " Resetting Kafka data (destructive operation)..."
-# 	@read -p " This will delete all Kafka data. Continue? (y/N): " confirm && [ "$$confirm" = "y" ]
-# 	@echo " Stopping all Kafka processes..."
-# 	@pkill -f kafka || echo "No Kafka processes found"
-# 	@sleep 2
-# 	@echo "🔧 Force killing port users..."
-# 	@lsof -ti:9092,9093 | xargs kill -9 2>/dev/null || echo "Ports already free"
-# 	@sleep 1
-# 	@echo " Removing Kafka data directory..."
-# 	@rm -rf $(KAFKA_LOG_DIR)
-# 	@echo " Removing PID files..."
-# 	@rm -f $(PID_DIR)/kafka.pid
-# 	@echo "✅ Kafka reset completed. Run 'make kafka-format' to reinitialize"
-
-# kafka-help:
-# 	@echo "🔧 Native Kafka Commands Help"
-# 	@echo "=================================================="
-# 	@echo "Installation Commands:"
-# 	@echo "  kafka-install    - Install Kafka natively (first time)"
-# 	@echo "  kafka-validate   - Validate installation"
-# 	@echo ""
-# 	@echo "Setup Commands:"
-# 	@echo "  kafka-format     - Format Kafka storage (first time)"
-# 	@echo "  kafka-start      - Start native Kafka broker"
-# 	@echo "  kafka-start-bg   - Start broker in background"
-# 	@echo "  kafka-stop       - Stop native Kafka broker"
-# 	@echo "  kafka-topics     - Create churn prediction topic"
-# 	@echo "  kafka-cleanup-topics - Remove unused topics"
-# 	@echo ""
-# 	@echo "Data Commands:"
-# 	@echo "  kafka-producer-stream  - Start streaming producer (real data)"
-# 	@echo "  kafka-producer-batch   - Start batch producer (real data)"
-# 	@echo "  kafka-consumer         - Start batch ML consumer"
-# 	@echo "  kafka-consumer-continuous - Start continuous ML consumer"
-# 	@echo ""
-# 	@echo "Monitoring Commands:"
-# 	@echo "  kafka-check      - Check broker status"
-# 	@echo "  kafka-monitor    - Monitor cluster health"
-# 	@echo "  kafka-sample     - Sample input topic messages"
-# 	@echo "  kafka-sample-scored - Show prediction analytics & statistics"
-# 	@echo "  kafka-sample-raw - Sample raw scored messages"
-# 	@echo "  kafka-test-event-driven - Test event-driven DAG logic"
-# 	@echo ""
-# 	@echo "Utility Commands:"
-# 	@echo "  kafka-demo       - Show demo instructions"
-# 	@echo "  kafka-reset      - Reset all Kafka data"
-# 	@echo "  kafka-clean-restart - Complete cleanup and restart"
-# 	@echo "  kafka-help       - Show this help"
-# 	@echo ""
-# 	@echo " For detailed setup: README_KAFKA.md"
-
-
-
-
-# ========================================================================================
-# NATIVE KAFKA STREAMING COMMANDS (KRaft Mode - Absolute Paths)
-# ========================================================================================
-
-PID_DIR := runtime/pids
-LOG_FILE := runtime/kafka.log
-
-#rm -rf runtime/kafka-logs /tmp/kraft-combined-logs
-
-kafka-format:
-	@echo "🔧 Formatting native Kafka storage (KRaft mode)..."
-	@if [ -z "$$KAFKA_HOME" ]; then echo "❌ KAFKA_HOME not set. Run 'source ~/.bashrc'"; exit 1; fi
-	@CONF_FILE="$${KAFKA_HOME}/config/kraft/server.properties"; \
-	if [ ! -f "$$CONF_FILE" ]; then \
-		echo "❌ Config file not found at: $$CONF_FILE"; \
-		exit 1; \
-	fi; \
-	echo " Generating cluster UUID..."; \
-	CLUSTER_ID=$$($${KAFKA_HOME}/bin/kafka-storage.sh random-uuid); \
-	echo "Using Cluster ID: $$CLUSTER_ID"; \
-	$${KAFKA_HOME}/bin/kafka-storage.sh format -t $$CLUSTER_ID -c "$$CONF_FILE" && \
-	echo "✅ Native Kafka storage formatted successfully"
-
-kafka-start-bg:
-	@echo "🚀 Starting Kafka (KRaft) in background..."
-	@if [ -z "$$KAFKA_HOME" ]; then echo "❌ KAFKA_HOME not set"; exit 1; fi
-	@CONF_FILE="$${KAFKA_HOME}/config/kraft/server.properties"; \
-	mkdir -p $(PID_DIR); \
-	nohup $${KAFKA_HOME}/bin/kafka-server-start.sh "$$CONF_FILE" > $(LOG_FILE) 2>&1 & \
-	echo $$! > $(PID_DIR)/kafka.pid
-	@echo "✅ Kafka broker started (PID: $$(cat $(PID_DIR)/kafka.pid))"
-	@echo "📄 Logs: $(LOG_FILE)"
-	@echo "⏳ Waiting 5 seconds for broker to initialize..."
-	@sleep 5
-	@if pgrep -F $(PID_DIR)/kafka.pid > /dev/null; then \
-		echo "✅ Broker is running!"; \
-	else \
-		echo "❌ Broker died immediately. Checking logs:"; \
-		tail -n 10 $(LOG_FILE); \
-	fi
-
-kafka-stop:
-	@echo "🛑 Stopping native Kafka broker..."
-	@if [ -f "$(PID_DIR)/kafka.pid" ]; then \
-		kill $$(cat $(PID_DIR)/kafka.pid) || true; \
-		rm -f $(PID_DIR)/kafka.pid; \
-		echo "✅ Kafka broker stopped"; \
-	else \
-		echo "⚠️ No running process found."; \
-	fi
-
-kafka-topics:
-	@echo "📝 Creating churn prediction topics..."
-	@if ! $${KAFKA_HOME}/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then \
-		echo "❌ Connection failed. Check runtime/kafka.log for errors."; \
-		exit 1; \
-	fi
-	@$${KAFKA_HOME}/bin/kafka-topics.sh --bootstrap-server localhost:9092 --create --topic churn_predictions --partitions 1 --replication-factor 1 --if-not-exists
-	@$${KAFKA_HOME}/bin/kafka-topics.sh --bootstrap-server localhost:9092 --create --topic churn_predictions_scored --partitions 1 --replication-factor 1 --if-not-exists
-	@echo "✅ Topics created successfully"
-	@$${KAFKA_HOME}/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list
-
-kafka-producer-stream:
-	@echo " Starting Kafka streaming producer (real data sampling)..."
-	@if ! $${KAFKA_HOME}/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then \
-		echo "❌ Cannot connect to native Kafka broker"; \
-		echo " Please start broker with 'make kafka-start-bg'"; \
-		exit 1; \
-	fi
-	@echo " Streaming real customer events to localhost:9092 (1 event/sec for 5 mins)"
-	@source $(VENV) && python pipelines/kafka_producer.py --mode streaming --rate 1 --duration 300
-
-kafka-producer-batch:
-	@echo " Starting Kafka batch producer (real data sampling)..."
-	@if ! $${KAFKA_HOME}/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then \
-		echo "❌ Cannot connect to native Kafka broker"; \
-		echo " Please start broker with 'make kafka-start-bg'"; \
-		exit 1; \
-	fi
-	@echo "📊 Batch processing 100 real customer events to localhost:9092"
-	@source $(VENV) && python pipelines/kafka_producer.py --mode batch --num-events 100
-
-kafka-consumer:
-	@echo " Starting Kafka batch consumer with ML predictions..."
-	@if ! $${KAFKA_HOME}/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then \
-		echo "❌ Cannot connect to native Kafka broker"; \
-		echo " Please start broker with 'make kafka-start-bg'"; \
-		exit 1; \
-	fi
-	@echo " Processing messages in batches with ML predictions"
-	@source $(VENV) && python pipelines/kafka_batch_consumer.py
-
-kafka-consumer-continuous:
-	@echo " Starting continuous Kafka consumer monitoring..."
-	@echo " Monitoring for NEW messages (real-time ML processing)"
-	@echo " Press Ctrl+C to stop monitoring"
-	@source $(VENV) && python pipelines/kafka_batch_consumer.py --continuous --poll-interval 5
-    
-kafka-check:
-	@echo " Checking native Kafka broker status..."
-	@if $${KAFKA_HOME}/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then \
-		echo "✅ Native Kafka broker is running at localhost:9092"; \
-		echo " Available topics:"; \
-		$${KAFKA_HOME}/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list; \
-		echo " Broker information:"; \
-		$${KAFKA_HOME}/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 | head -1; \
-	else \
-		echo "❌ Cannot connect to native Kafka broker at localhost:9092"; \
-		echo " Please start with 'make kafka-start-bg' in another terminal"; \
-		echo " Or check installation with 'make kafka-validate'"; \
-	fi
-    
-kafka-sample-scored:
-	@echo " Analyzing churn prediction results..."
-	@if $${KAFKA_HOME}/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list | grep -q churn_predictions_scored; then \
-		source $(VENV) && python scripts/kafka_analytics.py; \
-	else \
-		echo "❌ churn_predictions_scored topic not found. Run 'make kafka-topics' first."; \
-	fi
-
-kafka-cleanup-topics:
-	@echo " Cleaning up unused Kafka topics..."
-	@if ! $${KAFKA_HOME}/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then \
-		echo "❌ Cannot connect to native Kafka broker"; \
-		echo " Please start broker with 'make kafka-start-bg'"; \
-		exit 1; \
-	fi
-	@echo "Removing unused topics (keeping only churn_predictions)..."
-	@for topic in customer_events model_updates data_quality_alerts; do \
-		if $${KAFKA_HOME}/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list | grep -q "$$topic"; then \
-			echo " Deleting topic: $$topic"; \
-			$${KAFKA_HOME}/bin/kafka-topics.sh --bootstrap-server localhost:9092 --delete --topic "$$topic"; \
-		else \
-			echo "✅ Topic $$topic not found (already clean)"; \
+# Upload local data folders to S3 (one-time setup)
+s3-upload-data:
+	@echo "📤 Uploading data folders to S3 (one-time setup)..."
+	@echo "This will upload:"
+	@echo "   • data/raw/ → s3://bucket/data/raw/"
+	@echo "   • data/processed/ → s3://bucket/data/processed/"
+	@read -p "Continue? (y/N): " confirm && [ "$$confirm" = "y" ] || exit 1
+	# Load .env into shell if present so environment variables (AWS_*) are exported for upload
+	@set -o allexport; \
+		if [ -f .env ]; then \
+			sed -e 's/\r$$//' .env > .env.tmp && . .env.tmp && rm -f .env.tmp; \
 		fi; \
-	done
-	@echo "✅ Topic cleanup completed"
-	@echo " Remaining topics:"
-	@$${KAFKA_HOME}/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list
+		set +o allexport; \
+	# Use run_local.sh to ensure venv activation and AWS credential helpers run
+	@./run_local.sh python scripts/upload_data_to_s3.py
 
-kafka-flush-messages:
-	@echo " Flushing all messages from Kafka topics..."
-	@if ! $${KAFKA_HOME}/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then \
-		echo "❌ Cannot connect to native Kafka broker"; \
-		echo " Please start broker with 'make kafka-start-bg'"; \
-		exit 1; \
-	fi
-	@echo "Deleting and recreating topics to flush all messages..."
-	@$${KAFKA_HOME}/bin/kafka-topics.sh --bootstrap-server localhost:9092 --delete --topic churn_predictions 2>/dev/null || echo "Topic churn_predictions not found"
-	@$${KAFKA_HOME}/bin/kafka-topics.sh --bootstrap-server localhost:9092 --delete --topic churn_predictions_scored 2>/dev/null || echo "Topic churn_predictions_scored not found"
-	@sleep 2
-	@echo "🔮 Creating churn_predictions topic..."
-	@$${KAFKA_HOME}/bin/kafka-topics.sh --bootstrap-server localhost:9092 --create --topic churn_predictions --partitions 1 --replication-factor 1
-	@echo "🔮 Creating churn_predictions_scored topic..."
-	@$${KAFKA_HOME}/bin/kafka-topics.sh --bootstrap-server localhost:9092 --create --topic churn_predictions_scored --partitions 1 --replication-factor 1
-	@echo "✅ All messages flushed - topics are now empty"
-	@echo " Current topics:"
-	@$${KAFKA_HOME}/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list
+# S3 smoke test (write/read roundtrip)
+s3-smoke:
+	@echo "🔬 Running S3 smoke test..."
+	@./run_local.sh python -c "from utils.s3_io import put_bytes, get_bytes; test_data = b'Hello S3!'; put_bytes(test_data, key='test/smoke_test.txt'); result = get_bytes('test/smoke_test.txt'); print('✅ S3 smoke test passed!' if result == test_data else '❌ S3 smoke test failed!')"
 
-kafka-reset:
-	@echo " Resetting Kafka data (destructive operation)..."
-	@read -p " This will delete all Kafka data. Continue? (y/N): " confirm && [ "$$confirm" = "y" ]
-	@echo " Stopping all Kafka processes..."
-	@pkill -f kafka || echo "No Kafka processes found"
-	@sleep 2
-	@echo "🔧 Force killing port users..."
-	@lsof -ti:9092,9093 | xargs kill -9 2>/dev/null || echo "Ports already free"
-	@sleep 1
-	@echo " Removing Kafka data directory..."
-	@rm -rf runtime/kafka-logs
-	@echo " Removing PID files..."
-	@rm -f $(PID_DIR)/kafka.pid
-	@echo "✅ Kafka reset completed. Run 'make kafka-format' to reinitialize"
+# Test MLflow S3 integration
+mlflow-s3-test:
+	@echo "🧪 Testing MLflow S3 integration..."
+	@source $(VENV) && PYTHONPATH=. python test_mlflow_s3.py
 
-kafka-help:
-	@echo "🔧 Native Kafka Commands Help"
-	@echo "=================================================="
-	@echo "Installation Commands:"
-	@echo "  kafka-install     - Install Kafka natively (first time)"
-	@echo "  kafka-validate    - Validate installation"
+# Show project status
+status:
+	@echo "📊 Project Status"
+	@echo "================="
+	@echo "Python Version: $$(python --version 2>/dev/null || echo 'Not found')"
+	@echo "Virtual Env: $$([[ -d .venv ]] && echo '✅ Created' || echo '❌ Not found')"
+	@echo "Dependencies: $$([[ -f .venv/pyvenv.cfg ]] && echo '✅ Installed' || echo '❌ Not installed')"
 	@echo ""
-	@echo "Setup Commands:"
-	@echo "  kafka-format      - Format Kafka storage (first time)"
-	@echo "  kafka-start       - Start native Kafka broker"
-	@echo "  kafka-start-bg    - Start broker in background"
-	@echo "  kafka-stop        - Stop native Kafka broker"
-	@echo "  kafka-topics      - Create churn prediction topic"
-	@echo "  kafka-cleanup-topics - Remove unused topics"
+	@echo "🌐 S3 Configuration:"
+	@echo "S3 Bucket: $$(source $(VENV) && python -c 'from utils.config import get_s3_bucket; print(get_s3_bucket())' 2>/dev/null || echo 'Not configured')"
+	@echo "AWS Region: $$(source $(VENV) && python -c 'from utils.config import get_aws_region; print(get_aws_region())' 2>/dev/null || echo 'Not configured')"
+	@echo "Force S3 I/O: $$(source $(VENV) && python -c 'from utils.config import force_s3_io; print(force_s3_io())' 2>/dev/null || echo 'Not configured')"
 	@echo ""
-	@echo "Data Commands:"
-	@echo "  kafka-producer-stream  - Start streaming producer (real data)"
-	@echo "  kafka-producer-batch   - Start batch producer (real data)"
-	@echo "  kafka-consumer         - Start batch ML consumer"
-	@echo "  kafka-consumer-continuous - Start continuous ML consumer"
-	@echo ""
-	@echo "Monitoring Commands:"
-	@echo "  kafka-check       - Check broker status"
-	@echo "  kafka-monitor     - Monitor cluster health"
-	@echo "  kafka-sample      - Sample input topic messages"
-	@echo "  kafka-sample-scored - Show prediction analytics & statistics"
-	@echo "  kafka-sample-raw - Sample raw scored messages"
-	@echo "  kafka-test-event-driven - Test event-driven DAG logic"
-	@echo ""
-	@echo "Utility Commands:"
-	@echo "  kafka-demo        - Show demo instructions"
-	@echo "  kafka-reset       - Reset all Kafka data"
-	@echo "  kafka-clean-restart - Complete cleanup and restart"
-	@echo "  kafka-help        - Show this help"
-	@echo ""
-	@echo " For detailed setup: README_KAFKA.md"
-	
-# ========================================================================================
-# APACHE AIRFLOW ORCHESTRATION COMMANDS
-# ========================================================================================
+	@echo "📈 Recent S3 Artifacts:"
+	@source $(VENV) && PYTHONPATH=. python -c "from utils.s3_io import list_keys; keys = list_keys('artifacts/'); print('\\n'.join(keys[:5]))" 2>/dev/null || echo "No S3 artifacts found"
 
-airflow-init:
-	@echo "🔧 Initializing Apache Airflow..."
-	@export AIRFLOW_HOME="$(shell pwd)/.airflow" && \
-	export PYTHONPATH="$(shell pwd):$$PYTHONPATH" && \
-	source $(VENV) && \
-	pip install "apache-airflow>=2.10.0,<3.0.0" --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-2.10.3/constraints-3.9.txt" && \
-	pip install apache-airflow-providers-apache-spark && \
-	airflow db migrate && \
-	airflow users create -u admin -p admin -r Admin -e admin@example.com -f Admin -l User && \
-	mkdir -p .airflow/dags && find dags -name "*.py" -exec cp {} .airflow/dags/ \;
-	@echo "✅ Airflow initialized successfully!"
-
-airflow-start:
-	@echo " Starting Airflow in standalone mode..."
-	@echo "Checking for port conflicts..."
-	@if lsof -ti:8080,8793,8794 >/dev/null 2>&1; then \
-		echo "  Airflow ports are in use. Cleaning up first..."; \
-		$(MAKE) airflow-kill; \
-		sleep 3; \
-	fi
-	@echo "Ensuring DAGs are copied..."
-	@find dags -name "*.py" -exec cp {} .airflow/dags/ \; 2>/dev/null || true
-	@echo "Starting Airflow in standalone mode..."
-	@echo " Webserver will be available at http://localhost:8080"
-	@echo " Login with: admin / admin"
-	@export AIRFLOW_HOME="$(shell pwd)/.airflow" && \
-	export PYTHONPATH="$(shell pwd):$$PYTHONPATH" && \
-	export PYTHONWARNINGS="ignore::DeprecationWarning" && \
-	source $(VENV) && \
-	airflow standalone
-
-airflow-kill:
-	@echo " Killing all Airflow processes..."
-	@pkill -f airflow || echo "No Airflow processes found"
-	@sleep 2
-	@echo "Force killing any remaining Airflow processes..."
-	@pkill -9 -f airflow || echo "No remaining processes"
-	@sleep 1
-	@echo "Freeing Airflow ports (8080, 8793, 8794)..."
-	@lsof -ti:8080,8793,8794 | xargs kill -9 2>/dev/null || echo "No processes using Airflow ports"
-	@sleep 1
-	@echo "Cleaning up PID files..."
-	@rm -f .airflow/airflow-webserver.pid .airflow/airflow-scheduler.pid .airflow/airflow-triggerer.pid
-	@echo "✅ All Airflow processes killed and ports freed successfully!"
-
-airflow-reset:
-	@echo " Resetting Airflow database and fixing login issues..."
-	@$(MAKE) airflow-kill
-	@echo "Removing old database and logs..."
-	@rm -rf .airflow/airflow.db .airflow/logs/*
-	@find . -path "./.venv" -prune -o -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
-	@find . -path "./.venv" -prune -o -name "*.pyc" -delete 2>/dev/null || true
-	@echo "Reinitializing database..."
-	@export AIRFLOW_HOME="$(shell pwd)/.airflow" && \
-	export PYTHONWARNINGS="ignore::DeprecationWarning" && \
-	source $(VENV) && \
-	airflow db migrate
-	@echo "Creating admin user..."
-	@export AIRFLOW_HOME="$(shell pwd)/.airflow" && \
-	export PYTHONWARNINGS="ignore::DeprecationWarning" && \
-	source $(VENV) && \
-	airflow users create -u admin -f Admin -l User -p admin -r Admin -e admin@example.com
-	@echo "Copying DAGs..."
-	@find dags -name "*.py" -exec cp {} .airflow/dags/ \;
-	@echo "✅ Airflow reset complete! Login: admin/admin"
-	@echo "Start with: make airflow-start"
-
-# Re-run-all command removed - use individual commands instead
+# Install development dependencies
+dev-install: install
+	@echo "🛠️ Installing development dependencies..."
+	@source $(VENV) && pip install -e ".[dev]"
+	@echo "✅ Development setup completed!"
