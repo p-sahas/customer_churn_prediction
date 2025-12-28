@@ -235,7 +235,7 @@ train-pipeline: setup-dirs
 # Run batch inference pipeline
 inference-pipeline: setup-dirs
 	@echo "🔮 Running batch inference pipeline..."
-	@./run_local.sh python pipelines/inference_pipeline.py
+	@./run_local.sh python pipelines/streaming_inference_pipeline.py
 	@echo "✅ Inference pipeline completed successfully!"
 
 # Run all pipelines in sequence
