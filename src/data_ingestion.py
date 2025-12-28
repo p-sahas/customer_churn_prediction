@@ -74,10 +74,14 @@ class DataIngestorCSV(DataIngestor):
                 logger.info(f"📁 Loading from S3A: {data_path}")
             else:
                 # Handle local path or S3 URL from config
-                import sys
-                sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
-                from config import get_s3_bucket, force_s3_io
-                from s3_io import key_exists
+                project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+                if project_root not in sys.path:
+                    sys.path.insert(0, project_root)
+                src_path = os.path.join(project_root, 'src')
+                if src_path not in sys.path:
+                    sys.path.insert(0, src_path)
+                from utils.config import get_s3_bucket, force_s3_io
+                from utils.s3_io import key_exists
                 
                 # Check if this is an S3 URL that needs conversion
                 if 's3://' in file_path_or_link:
@@ -312,11 +316,15 @@ def smoke_test_s3a_read():
     print("🧪 Testing S3A CSV reading...")
     
     try:
-        import sys
-        sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
-        from spark_session import create_spark_session
-        from s3_io import key_exists
-        
+        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+        if project_root not in sys.path:
+            sys.path.insert(0, project_root)
+        src_path = os.path.join(project_root, 'src')
+        if src_path not in sys.path:
+            sys.path.insert(0, src_path)
+        from utils.spark_session import create_spark_session
+        from utils.s3_io import key_exists
+
         # Create Spark session with S3A support
         spark = create_spark_session("S3A_SmokeTest")
         

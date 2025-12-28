@@ -14,6 +14,7 @@ from pyspark.sql import functions as F
 from pyspark.ml.feature import StringIndexer, OneHotEncoder, IndexToString
 from pyspark.ml import Pipeline
 from utils.spark_session import get_or_create_spark_session
+import sys
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -143,14 +144,25 @@ class NominalEncodingStrategy(FeatureEncodingStrategy):
                 encoder_s3_key = f"artifacts/data_artifacts/{pipeline_timestamp}/{column}_encoder.json"
                 
                 # Import S3 utilities
-                import sys
-                import os
-                sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
-                from s3_io import put_bytes
+                project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+                if project_root not in sys.path:
+                    sys.path.insert(0, project_root)
+                src_path = os.path.join(project_root, 'src')
+                if src_path not in sys.path:
+                    sys.path.insert(0, src_path)
+                from utils.s3_io import put_bytes
+                from utils.config import get_s3_bucket
                 
                 encoder_json = json.dumps(encoder_dict, indent=2).encode('utf-8')
                 put_bytes(encoder_json, key=encoder_s3_key, content_type='application/json')
-                logger.info(f"  ✓ Saved encoder to s3://{encoder_s3_key}")
+                try:
+                    bucket = get_s3_bucket()
+                except Exception:
+                    bucket = None
+                if bucket:
+                    logger.info(f"  ✓ Saved encoder to s3://{bucket}/{encoder_s3_key}")
+                else:
+                    logger.info(f"  ✓ Saved encoder to s3://{encoder_s3_key}")
                 
             except Exception as s3_error:
                 logger.error(f"❌ S3 encoder save failed: {s3_error}")
