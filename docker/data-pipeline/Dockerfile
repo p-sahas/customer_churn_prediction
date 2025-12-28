@@ -1,7 +1,7 @@
 # Data Pipeline Service  
 FROM eclipse-temurin:17-jre
 
-LABEL org.opencontainers.image.source="https://github.com/zuucrew/ml-pipeline"
+LABEL org.opencontainers.image.source="https://github.com/p-sahas/ml-pipeline"
 LABEL org.opencontainers.image.version="1.0.0"
 LABEL org.opencontainers.image.description="Data Pipeline with PySpark and S3 integration"
 
