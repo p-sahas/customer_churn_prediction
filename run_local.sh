@@ -8,13 +8,18 @@ export AWS_PROFILE="${AWS_PROFILE:-default}"  # Use default AWS profile
 
 # Set AWS credentials from environment or credentials file
 if [ -z "$AWS_ACCESS_KEY_ID" ] && [ -f ~/.aws/credentials ]; then
-    # Extract credentials from AWS credentials file
-    AWS_ACCESS_KEY_ID=$(grep -A2 "\\[default\\]" ~/.aws/credentials | grep aws_access_key_id | cut -d'=' -f2 | tr -d ' ')
-    AWS_SECRET_ACCESS_KEY=$(grep -A2 "\\[default\\]" ~/.aws/credentials | grep aws_secret_access_key | cut -d'=' -f2 | tr -d ' ')
+    # Extract credentials from AWS credentials file (trim CR/LF and whitespace)
+    AWS_ACCESS_KEY_ID=$(grep -A2 "\[default\]" ~/.aws/credentials | grep aws_access_key_id | cut -d'=' -f2 | tr -d ' ' | tr -d '\r')
+    AWS_SECRET_ACCESS_KEY=$(grep -A2 "\[default\]" ~/.aws/credentials | grep aws_secret_access_key | cut -d'=' -f2 | tr -d ' ' | tr -d '\r')
     export AWS_ACCESS_KEY_ID
     export AWS_SECRET_ACCESS_KEY
     export AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-ap-south-1}"
     export AWS_REGION="${AWS_REGION:-ap-south-1}"
+
+    # Sanitize region variables (remove stray CR/LF characters from .env source)
+    AWS_DEFAULT_REGION=$(echo "${AWS_DEFAULT_REGION}" | tr -d '\r' | tr -d ' ')
+    AWS_REGION=$(echo "${AWS_REGION}" | tr -d '\r' | tr -d ' ')
+    export AWS_DEFAULT_REGION AWS_REGION
     
     # Set AWS config directory to avoid profile issues
     export AWS_CONFIG_FILE="$HOME/.aws/config"

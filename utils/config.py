@@ -1,7 +1,11 @@
 import os
 import yaml
 import logging
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 logging.basicConfig(level=logging.INFO, format=
     '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -161,6 +165,115 @@ def create_default_config() ->None:
         with open(config_path, 'w') as file:
             yaml.dump(default_config, file, default_flow_style=False)
         logger.info(f'Created default configuration file: {config_path}')
+
+
+# AWS S3 Configuration Functions
+def get_aws_config() -> Dict[str, Any]:
+    """Get AWS configuration from config.yaml"""
+    config = load_config()
+    aws_config = config.get('aws', {})
+    
+    # Fallback to environment variables if not in config.yaml
+    region = aws_config.get('region', os.getenv('AWS_REGION', 'ap-south-1'))
+    bucket = aws_config.get('s3_bucket', os.getenv('S3_BUCKET'))
+    kms = aws_config.get('s3_kms_key_arn', os.getenv('S3_KMS_KEY_ARN'))
+    # Default to False for local development so we can fall back to local artifacts when S3/KMS access fails
+    force_s3 = aws_config.get('force_s3_io', os.getenv('FORCE_S3_IO', 'false').lower() in ('true', '1', 'yes'))
+
+    # Sanitize strings (strip whitespace, stray CR characters, and surrounding quotes)
+    def _sanitize(s: str) -> str:
+        return s.strip().strip('\r').strip().strip('\"\'') if isinstance(s, str) else s
+
+    if isinstance(region, str):
+        region = _sanitize(region)
+    if isinstance(bucket, str) and bucket:
+        bucket = _sanitize(bucket)
+    if isinstance(kms, str) and kms:
+        kms = _sanitize(kms)
+
+    return {
+        'region': region,
+        'bucket': bucket,
+        'kms_key_arn': kms,
+        'force_s3_io': force_s3
+    }
+
+
+def get_aws_region() -> str:
+    """Get AWS region from config.yaml or environment variables (sanitized)."""
+    aws_config = get_aws_config()
+    region = aws_config.get('region', 'ap-south-1')
+    if isinstance(region, str):
+        return region.strip().strip('\r').strip().strip('\'"')
+    return region
+
+
+def get_s3_bucket() -> str:
+    """Get S3 bucket name from config.yaml or environment variables (required)"""
+    aws_config = get_aws_config()
+    bucket = aws_config['bucket']
+    if not bucket:
+        raise ValueError(
+            "S3 bucket is required. Please set 'aws.s3_bucket' in config.yaml "
+            "or S3_BUCKET environment variable."
+        )
+    return bucket
+
+
+def get_s3_kms_arn() -> Optional[str]:
+    """Get S3 KMS key ARN from config.yaml or environment variables"""
+    aws_config = get_aws_config()
+    kms = aws_config['kms_key_arn']
+    if isinstance(kms, str) and kms:
+        return kms.strip().strip('\r').strip().strip('\'"')
+    return kms
+
+
+def force_s3_io() -> bool:
+    """Check if S3-only I/O is enforced from config.yaml or environment variables"""
+    aws_config = get_aws_config()
+    return aws_config['force_s3_io']
+
+
+def get_mlflow_config() -> Dict[str, Any]:
+    """Get MLflow configuration from config.yaml"""
+    config = load_config()
+    mlflow_config = config.get('mlflow', {})
+    
+    # Environment variables take priority over config.yaml
+    return {
+        'tracking_uri': os.getenv('MLFLOW_TRACKING_URI') or mlflow_config.get('tracking_uri', 'http://localhost:5001'),
+        'artifact_root': os.getenv('MLFLOW_DEFAULT_ARTIFACT_ROOT') or mlflow_config.get('artifact_root'),
+        'experiment_name': mlflow_config.get('experiment_name', 'Zuu Crew Churn Analysis')
+    }
+
+
+def get_s3_config() -> Dict[str, Any]:
+    """Get complete S3 configuration (legacy function for compatibility)"""
+    config = load_config()
+    return config.get('aws', {})
+
+def get_aws_region():
+    """Get AWS region from environment variables or config (sanitized)."""
+    # Try environment variables first
+    region = os.environ.get('AWS_REGION') or os.environ.get('AWS_DEFAULT_REGION')
+    if region:
+        return region.strip().strip('\r').strip().strip('\'"')
+    
+    # Fallback to config file
+    config = load_config()
+    region = config.get('aws', {}).get('region', 'ap-south-1')
+    if isinstance(region, str):
+        return region.strip().strip('\r').strip().strip('\'"')
+    return region
+
+def get_s3_kms_arn():
+    """Get S3 KMS key ARN from config"""
+    config = load_config()
+    kms = config.get('aws', {}).get('s3_kms_key_arn')
+    if isinstance(kms, str) and kms:
+        return kms.strip().strip('\r').strip().strip('\'"')
+    return kms
 
 
 create_default_config()
