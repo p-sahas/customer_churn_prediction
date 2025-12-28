@@ -3,20 +3,30 @@ import sys
 import logging
 import pandas as pd
 import numpy as np
-from pipelines.data_pipeline import data_pipeline
+from data_pipeline import data_pipeline
 from typing import Dict, Any, Optional
-import json
-from pyspark.sql import SparkSession, DataFrame
-from pyspark.sql import functions as F
+from pyspark.sql import SparkSession
 
-from src.spark_session import create_spark_session, stop_spark_session
-from src.spark_utils import spark_to_pandas
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+# Ensure project root and `src` are on sys.path so top-level packages like `utils` and modules in `src` are importable
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+src_path = os.path.join(project_root, 'src')
+if src_path not in sys.path:
+    sys.path.insert(0, src_path)
 
-from src.model_training import ModelTrainer
-from src.model_evaluation import ModelEvaluator
-from src.model_building import XGboostModelBuilder, RandomForestModelBuilder
+from utils.spark_session import create_spark_session, stop_spark_session
+from utils.spark_utils import spark_to_pandas
+
+# Import both sklearn and PySpark model components
+from model_training import ModelTrainer, SparkModelTrainer
+from model_evaluation import ModelEvaluator, SparkModelEvaluator
+from model_building import XGboostModelBuilder, SparkRandomForestModelBuilder
+
 from utils.mlflow_utils import MLflowTracker, create_mlflow_run_tags
-from utils.config import get_model_config, get_data_paths, get_encoding_config
+from config import get_model_config, get_data_paths, get_s3_bucket, force_s3_io
+from s3_artifact_manager import S3ArtifactManager, get_latest_s3_artifacts
+from s3_io import read_df_csv, write_pickle
 import mlflow
 
 logging.basicConfig(level=logging.INFO, format=
@@ -27,268 +37,209 @@ logger = logging.getLogger(__name__)
 def training_pipeline(
                     data_path: str = 'data/raw/ChurnModelling.csv',
                     model_params: Optional[Dict[str, Any]] = None,
-                    test_size: float = 0.2, random_state: int = 42,
+                    test_size: float = 0.2, 
+                    random_state: int = 42,
                     model_path: str = 'artifacts/models/churn_analysis.joblib',
-                    data_format: str = 'csv'
+                    data_format: str = 'csv',
+                    training_engine: str = 'pyspark'  # 'sklearn' or 'pyspark'
                     ):
     """
-    Execute comprehensive model training pipeline with structured logging.
+    Execute model training pipeline with either scikit-learn or PySpark MLlib.
     """
+    
+    # Generate single timestamp for entire training pipeline run
+    from datetime import datetime
+    pipeline_timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+    logger.info(f" Training pipeline timestamp: {pipeline_timestamp}")
+    
     logger.info(f"\n{'='*80}")
-    logger.info(f"STARTING MACHINE LEARNING TRAINING PIPELINE")
+    logger.info(f"STARTING TRAINING PIPELINE - ENGINE: {training_engine.upper()}")
     logger.info(f"{'='*80}")
 
     # Run data pipeline first
     data_pipeline()
 
-    # Initialize Spark session
+    # Initialize Spark session (needed for both data loading and PySpark training)
     spark = create_spark_session("ChurnPredictionTrainingPipeline")
     
     try:
+        # MLflow setup
         mlflow_tracker = MLflowTracker()
         run_tags = create_mlflow_run_tags(
-                                        'training_pipeline', {
-                                                            'model_type' : 'XGboost',
-                                                            'training_strategy' : 'simple',
-                                                            'data_path': data_path,
-                                                            'model_path': model_path,
-                                                            'data_format': data_format,
-                                                            'processing_engine': 'pyspark'
-                                                            }
-                                                            )
+            'training_pipeline', {
+                'training_engine': training_engine,
+                'model_path': model_path,
+                'data_format': data_format
+            }
+        )
         run = mlflow_tracker.start_run(run_name='training_pipeline', tags=run_tags)
+
+        # Load processed data using latest S3 artifacts
+        logger.info("Loading processed training data from S3...")
         
-        # Create artifacts directory for this run
-        run_artifacts_dir = os.path.join('artifacts', 'mlflow_training_artifacts', run.info.run_id)
-        os.makedirs(run_artifacts_dir, exist_ok=True)
-
-        # Load training data with logging
-        logger.info(f"\n{'='*80}")
-        logger.info(f"DATA LOADING STEP")
-        logger.info(f"{'='*80}")
-        
-        data_paths = get_data_paths()
-        
-        ############### PANDAS CODES ###########################
-        # if data_format == 'parquet':
-        #     # Load Parquet files
-        #     X_train = pd.read_parquet(f"{data_paths['processed_data']}/X_train.parquet")
-        #     Y_train = pd.read_parquet(f"{data_paths['processed_data']}/Y_train.parquet")
-        #     X_test = pd.read_parquet(f"{data_paths['processed_data']}/X_test.parquet")
-        #     Y_test = pd.read_parquet(f"{data_paths['processed_data']}/Y_test.parquet")
-        # else:
-        #     # Load CSV files (default)
-        #     X_train = pd.read_csv(data_paths['X_train'])
-        #     Y_train = pd.read_csv(data_paths['Y_train'])
-        #     X_test = pd.read_csv(data_paths['X_test'])
-        #     Y_test = pd.read_csv(data_paths['Y_test'])
-        # 
-        # logger.info(f"✓ Data loaded from {data_format.upper()} - Training: {X_train.shape}, Test: {X_test.shape}")
-        
-        ############### PYSPARK CODES ###########################
-        logger.info(f"Loading training and test datasets (format: {data_format}) using PySpark...")
-        
-        if data_format == 'parquet':
-            # Load Parquet files with PySpark
-            X_train_spark = spark.read.parquet(f"{data_paths['processed_data']}/X_train.parquet")
-            Y_train_spark = spark.read.parquet(f"{data_paths['processed_data']}/Y_train.parquet")
-            X_test_spark = spark.read.parquet(f"{data_paths['processed_data']}/X_test.parquet")
-            Y_test_spark = spark.read.parquet(f"{data_paths['processed_data']}/Y_test.parquet")
-        else:
-            # Load CSV files with PySpark (default)
-            X_train_spark = spark.read.csv(data_paths['X_train'], header=True, inferSchema=True)
-            Y_train_spark = spark.read.csv(data_paths['Y_train'], header=True, inferSchema=True)
-            X_test_spark = spark.read.csv(data_paths['X_test'], header=True, inferSchema=True)
-            Y_test_spark = spark.read.csv(data_paths['Y_test'], header=True, inferSchema=True)
-        
-        logger.info(f" Data loaded from {data_format.upper()} with PySpark:")
-        logger.info(f"  • X_train: {X_train_spark.count()} rows, {len(X_train_spark.columns)} columns")
-        logger.info(f"  • X_test: {X_test_spark.count()} rows, {len(X_test_spark.columns)} columns")
-        logger.info(f"  • Y_train: {Y_train_spark.count()} rows, {len(Y_train_spark.columns)} columns")
-        logger.info(f"  • Y_test: {Y_test_spark.count()} rows, {len(Y_test_spark.columns)} columns")
-        
-        # Convert to pandas for model training (since sklearn/xgboost expects pandas/numpy)
-        logger.info("Converting PySpark DataFrames to pandas for model training...")
-        X_train = spark_to_pandas(X_train_spark)
-        Y_train = spark_to_pandas(Y_train_spark)
-        X_test = spark_to_pandas(X_test_spark)
-        Y_test = spark_to_pandas(Y_test_spark)
-
-        logger.info(f" Converted to pandas - Training: {X_train.shape}, Test: {X_test.shape}")
-
-        # Ensure nominal categorical columns are encoded to numeric integers for XGBoost
-        encoding_config = get_encoding_config()
-        nominal_cols = encoding_config.get('nominal_columns', []) if encoding_config else []
-        encoder_dir = os.path.join('artifacts', 'encode')
-        os.makedirs(encoder_dir, exist_ok=True)
-
-        for col in nominal_cols:
-            try:
-                encoder_file = os.path.join(encoder_dir, f"{col}_encoder.json")
-
-                # If an encoder file already exists, use it to map values consistently
-                if os.path.exists(encoder_file):
-                    with open(encoder_file, 'r') as f:
-                        mapping = json.load(f)
-                    logger.info(f"Loaded existing encoder for '{col}' with {len(mapping)} categories")
-
-                    # Apply mapping and handle unseen categories
-                    X_train[col] = X_train[col].map(mapping).fillna(-1).astype(int)
-                    X_test[col] = X_test[col].map(mapping).fillna(-1).astype(int)
-
-                else:
-                    # Build mapping from training data categories
-                    if col in X_train.columns:
-                        X_train[col] = X_train[col].fillna('Unknown').astype('category')
-                        cat = X_train[col].cat
-                        mapping = {str(cat.categories[i]): int(i) for i in range(len(cat.categories))}
-
-                        # Replace values with integer codes
-                        X_train[col] = cat.codes.astype(int)
-
-                        # Apply same categories to test set; unseen values will be coded as -1
-                        X_test[col] = pd.Categorical(X_test[col].fillna('Unknown'), categories=cat.categories).codes.astype(int)
-
-                        # Save encoder mapping for inference
-                        with open(encoder_file, 'w') as f:
-                            json.dump(mapping, f, indent=2)
-
-                        logger.info(f"Saved encoder mapping for '{col}' with {len(mapping)} categories to {encoder_file}")
-                        # Log mapping as MLflow artifact
-                        mlflow.log_artifact(encoder_file, artifact_path='encoders')
-                    else:
-                        logger.warning(f"Nominal column '{col}' not present in training data - skipping encoding")
-
-            except Exception as e:
-                logger.error(f" Failed to encode nominal column '{col}': {str(e)}")
-                raise
-
-        logger.info("Nominal encoding applied to pandas DataFrames (training & test)")
-
-        # Save final feature names used for training so inference can match them exactly
-        feature_names = list(X_train.columns)
-        feature_names_path = os.path.join('artifacts', 'encode', 'feature_names.json')
-        os.makedirs(os.path.dirname(feature_names_path), exist_ok=True)
-        with open(feature_names_path, 'w') as f:
-            json.dump(feature_names, f, indent=2)
-        logger.info(f"Saved feature names used for training to {feature_names_path}")
-        # Log as MLflow artifact for traceability
         try:
-            mlflow.log_artifact(feature_names_path, artifact_path='encoders')
-        except Exception:
-            logger.warning("Could not log feature names artifact to MLflow")
-        
-        # Log dataset information
+            # Try to get latest S3 artifacts
+            s3_manager = S3ArtifactManager()
+            latest_paths = s3_manager.get_latest_artifacts(
+                ['X_train', 'X_test', 'Y_train', 'Y_test'], 
+                artifact_type='data_artifacts',
+                format_ext=data_format
+            )
+            
+            if len(latest_paths) == 4:
+                logger.info(f"✅ Found latest {data_format} artifacts in S3:")
+                for key, path in latest_paths.items():
+                    logger.info(f"   {key}: s3://{get_s3_bucket()}/{path}")
+                
+                bucket = get_s3_bucket()
+                
+                if data_format == 'parquet':
+                    # Convert S3 keys to s3a:// URLs for Spark
+                    s3a_paths = {k: f"s3a://{bucket}/{v}" for k, v in latest_paths.items()}
+                    
+                    X_train = spark.read.parquet(s3a_paths['X_train'])
+                    X_test = spark.read.parquet(s3a_paths['X_test'])
+                    Y_train = spark.read.parquet(s3a_paths['Y_train'])
+                    Y_test = spark.read.parquet(s3a_paths['Y_test'])
+                    
+                    # Convert to pandas for sklearn or keep as Spark for PySpark
+                    if training_engine == 'sklearn':
+                        X_train = spark_to_pandas(X_train)
+                        X_test = spark_to_pandas(X_test)
+                        Y_train = spark_to_pandas(Y_train)
+                        Y_test = spark_to_pandas(Y_test)
+                else:
+                    # Load CSV data from S3
+                    X_train = read_df_csv(key=latest_paths['X_train'])
+                    X_test = read_df_csv(key=latest_paths['X_test'])
+                    Y_train = read_df_csv(key=latest_paths['Y_train'])
+                    Y_test = read_df_csv(key=latest_paths['Y_test'])
+            else:
+                raise FileNotFoundError("Could not find all required artifacts")
+                
+        except Exception as e:
+            logger.error(f" Could not load S3 artifacts: {e}")
+            logger.error("💡 Please check your AWS credentials and S3 bucket configuration")
+            logger.error("💡 Make sure the data pipeline has run successfully and saved data to S3")
+            raise e
+
+        logger.info(f"✓ Data loaded successfully")
+
+        # Train model based on engine
+        if training_engine == 'pyspark':
+            evaluation_results = _train_pyspark_model(
+                spark, X_train, X_test, Y_train, Y_test, model_params, model_path
+            )
+        else:
+            evaluation_results = _train_sklearn_model(
+                X_train, X_test, Y_train, Y_test, model_params, model_path
+            )
+
+        # Log results to MLflow
         mlflow.log_metrics({
-                        'train_samples': len(X_train),
-                        'test_samples': len(X_test),
-                        'num_features': X_train.shape[1],
-                        'train_class_0': (Y_train == 0).sum().iloc[0],
-                        'train_class_1': (Y_train == 1).sum().iloc[0],
-                        'test_class_0': (Y_test == 0).sum().iloc[0],
-                        'test_class_1': (Y_test == 1).sum().iloc[0]
-                        })
-        
-        # Log feature names
-        mlflow.log_param('feature_names', list(X_train.columns))
-
-        # Model building and training with timing
-        logger.info(f"\n{'='*80}")
-        logger.info(f"MODEL TRAINING STEP")
-        logger.info(f"{'='*80}")
-        logger.info("Building and training XGBoost model...")
-        import time
-        training_start_time = time.time()
-        
-        model_builder = XGboostModelBuilder(**model_params)
-        model = model_builder.build_model()
-
-        trainer = ModelTrainer()
-        model, training_history = trainer.train(
-                                model=model,
-                                X_train=X_train,
-                                Y_train=Y_train.squeeze()
-                                )
-        
-        training_end_time = time.time()
-        training_time = training_end_time - training_start_time
-        logger.info(f" Model training completed in {training_time:.2f} seconds")
-        
-        # Save model
-        trainer.save_model(model, model_path)
-        logger.info(f" Model saved to: {model_path}")
-        
-        # Log model to MLflow artifacts
-        mlflow.log_artifact(model_path, "trained_models")
-        
-        # Model evaluation with comprehensive logging
-        logger.info(f"\n{'='*80}")
-        logger.info(f"MODEL EVALUATION STEP")
-        logger.info(f"{'='*80}")
-        logger.info("Evaluating model performance...")
-        evaluator = ModelEvaluator(model, 'XGboost')
-        evaluation_results = evaluator.evaluate(X_test, Y_test)
-        evaluation_results_cp = evaluation_results.copy()
-        
-        # Log training metrics (remove confusion matrix for MLflow logging)
-        if 'cm' in evaluation_results_cp:
-            del evaluation_results_cp['cm']
-        
-        # Add additional training metrics
-        evaluation_results_cp.update({
-            'training_time_seconds': training_time,
-            'model_complexity': model.n_estimators if hasattr(model, 'n_estimators') else 0,
-            'max_depth': model.max_depth if hasattr(model, 'max_depth') else 0
+            'accuracy': evaluation_results.get('accuracy', 0),
+            'precision': evaluation_results.get('precision', 0),
+            'recall': evaluation_results.get('recall', 0),
+            'f1_score': evaluation_results.get('f1', 0)
         })
-        
-        # Get model config for logging
-        model_config = get_model_config()['model_params']
-        mlflow_tracker.log_training_metrics(model, evaluation_results_cp, model_config)
-        
-        # Log training summary
-        training_summary = {
-            'model_type': 'XGboost',
-            'training_samples': len(X_train),
-            'test_samples': len(X_test),
-            'features_used': X_train.shape[1],
-            'training_time': training_time,
-            'model_path': model_path,
-            'performance_metrics': evaluation_results_cp,
-            'timestamp': pd.Timestamp.now().isoformat()
-        }
-        
-        # Save training summary
-        summary_path = os.path.join(run_artifacts_dir, 'training_summary.json')
-        with open(summary_path, 'w') as f:
-            json.dump(training_summary, f, indent=2, default=str)
-        
-        mlflow.log_artifact(summary_path, "training_summary")
-        
-        logger.info(f"\n{'='*80}")
-        logger.info(f"TRAINING PIPELINE COMPLETED SUCCESSFULLY")
-        logger.info(f"{'='*80}")
-        logger.info(" Training pipeline completed successfully!")
-        logger.info(f"  • Model Performance - Accuracy: {evaluation_results.get('accuracy', 'N/A'):.4f}")
-        logger.info(f"  • Model Performance - F1 Score: {evaluation_results.get('f1', 'N/A'):.4f}")
-        logger.info(f"  • Training Time: {training_time:.2f} seconds")
-        logger.info(f"  • Model saved to: {model_path}")
-        logger.info(f"  • Training samples: {len(X_train)}")
-        logger.info(f"  • Test samples: {len(X_test)}")
-        logger.info(f"  • Features used: {X_train.shape[1]}")
-        
-        mlflow_tracker.end_run()
-        
+
+        logger.info("✓ Training pipeline completed successfully!")
+        return evaluation_results
+
     except Exception as e:
-        logger.error(f" Training pipeline failed: {str(e)}")
-        if 'mlflow_tracker' in locals():
-            mlflow_tracker.end_run()
+        logger.error(f"✗ Training pipeline failed: {str(e)}")
         raise
     finally:
-        # Stop Spark session
         stop_spark_session(spark)
+
+
+def _train_sklearn_model(X_train, X_test, Y_train, Y_test, model_params, model_path):
+    """Train model using scikit-learn."""
+    logger.info("Training with scikit-learn...")
+    
+    # Build model
+    model_builder = XGboostModelBuilder(**model_params)
+    model = model_builder.build_model()
+
+    # Train model
+    trainer = ModelTrainer()
+    model, training_score = trainer.train(model, X_train, Y_train.squeeze())
+    
+    # Save model
+    trainer.save_model(model, model_path)
+    
+    # Evaluate model
+    evaluator = ModelEvaluator(model, 'XGboost')
+    evaluation_results = evaluator.evaluate(X_test, Y_test)
+    
+    return evaluation_results
+
+
+def _train_pyspark_model(spark, X_train, X_test, Y_train, Y_test, model_params, model_path):
+    """Train model using PySpark MLlib."""
+    logger.info("Training with PySpark MLlib...")
+    
+    # Convert pandas to Spark DataFrames if needed
+    if isinstance(X_train, pd.DataFrame):
+        # Combine features and labels
+        train_pandas = X_train.copy()
+        train_pandas['label'] = Y_train.squeeze()
+        train_spark_df = spark.createDataFrame(train_pandas)
+        
+        test_pandas = X_test.copy()
+        test_pandas['label'] = Y_test.squeeze()
+        test_spark_df = spark.createDataFrame(test_pandas)
+        
+        feature_columns = X_train.columns.tolist()
+    else:
+        # Already Spark DataFrames
+        train_spark_df = X_train
+        test_spark_df = X_test
+        feature_columns = [col for col in X_train.columns if col != 'label']
+    
+    # Build PySpark model
+    model_builder = SparkRandomForestModelBuilder(**model_params)
+    model = model_builder.build_model()
+    
+    # Train model
+    trainer = SparkModelTrainer(spark)
+    trained_pipeline, training_metrics = trainer.train(
+        model, train_spark_df, feature_columns
+    )
+    
+    # Save PySpark model
+    trainer.save_model(trained_pipeline, model_path)
+    
+    # Also train and save sklearn model as fallback
+    logger.info("🔄 Training sklearn model as fallback...")
+    # Extract timestamp from model_path: artifacts/model_artifacts/{timestamp}/spark_random_forest_model
+    timestamp = model_path.split('/')[2]  # Get timestamp from path
+    sklearn_model = trainer.train_sklearn_fallback(X_train, Y_train, X_test, Y_test, timestamp)
+    
+    # Evaluate model
+    evaluator = SparkModelEvaluator(trained_pipeline, 'SparkRandomForest')
+    evaluation_results = evaluator.evaluate(test_spark_df)
+    
+    return evaluation_results
 
 
 if __name__ == '__main__':
     model_config = get_model_config()
-    model_params=model_config.get('model_params')
-    training_pipeline(model_params=model_params)
+    training_engine = model_config.get('training_engine', 'pyspark')
+    
+    # Generate timestamp for model versioning
+    from datetime import datetime
+    timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+    
+    if training_engine == 'pyspark':
+        model_params = model_config.get('pyspark_model_types', {}).get('spark_random_forest', {})
+        model_path = f'artifacts/model_artifacts/{timestamp}/spark_random_forest_model'
+    else:
+        model_params = model_config.get('model_params', {})
+        model_path = f'artifacts/model_artifacts/{timestamp}/sklearn_model.joblib'
+    
+    training_pipeline(
+        model_params=model_params,
+        model_path=model_path,
+        training_engine=training_engine
+    )
