@@ -12,7 +12,13 @@ from pyspark.sql import functions as F
 from utils.spark_session import get_or_create_spark_session
 from utils.spark_utils import spark_to_pandas
 
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+src_path = os.path.join(project_root, 'src')
+if src_path not in sys.path:
+    sys.path.insert(0, src_path)
+
 from utils.config import get_binning_config, get_encoding_config
 logging.basicConfig(level=logging.INFO, format=
     '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -96,12 +102,15 @@ class ModelInference:
         logger.info("Loading trained model...")
         
         # Import S3 utilities for model loading
-        import sys
-        import os
-        sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
-        from s3_io import read_pickle, key_exists
-        from s3_artifact_manager import S3ArtifactManager
-        from config import get_s3_bucket
+        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+        if project_root not in sys.path:
+            sys.path.insert(0, project_root)
+        src_path = os.path.join(project_root, 'src')
+        if src_path not in sys.path:
+            sys.path.insert(0, src_path)
+        from utils.s3_io import read_pickle, key_exists
+        from utils.s3_artifact_manager import S3ArtifactManager
+        from utils.config import get_s3_bucket
         
         bucket = get_s3_bucket()
         

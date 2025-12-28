@@ -164,11 +164,14 @@ class SparkModelTrainer:
             logger.info(f"✓ PySpark model saved to MLflow registry: {model_name}")
             
             # Also save model metadata to our organized S3 structure
-            import sys
-            import os
-            sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
-            from config import get_s3_bucket
-            from s3_io import put_bytes
+            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+            if project_root not in sys.path:
+                sys.path.insert(0, project_root)
+            src_path = os.path.join(project_root, 'src')
+            if src_path not in sys.path:
+                sys.path.insert(0, src_path)
+            from utils.config import get_s3_bucket
+            from utils.s3_io import put_bytes
             import json
             
             model_metadata = {
@@ -259,15 +262,18 @@ class SparkModelTrainer:
         
         # Save sklearn model to S3
         try:
-            import sys
-            import os
-            sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
-            from s3_io import write_pickle
-            
+            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+            if project_root not in sys.path:
+                sys.path.insert(0, project_root)
+            src_path = os.path.join(project_root, 'src')
+            if src_path not in sys.path:
+                sys.path.insert(0, src_path)
+            from utils.s3_io import write_pickle
+
             sklearn_model_key = f"artifacts/model_artifacts/{timestamp}/sklearn_model.pkl"
             write_pickle(sklearn_model, key=sklearn_model_key)
             logger.info(f"✅ Sklearn model saved to S3: {sklearn_model_key}")
-            
+
         except Exception as sklearn_save_error:
             logger.warning(f"⚠️ Failed to save sklearn model to S3: {sklearn_save_error}")
             
