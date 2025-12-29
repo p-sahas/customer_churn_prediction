@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from airflow.operators.python import PythonOperator
 
 project_root = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, '/Users/machinelearningzuu/Dropbox/Zuu Crew/Courses/Building Production-Ready Machine Learning Systems/Live Classes/Week 08')
+sys.path.insert(0, '_Programming\customer_churn_prediction')
 
 from utils.airflow_tasks import validate_processed_data, run_training_pipeline
 
@@ -18,7 +18,7 @@ Validate Processed Data -> Run Train Pipeline Task
 """
 
 default_arguments = {
-                    'owner' : 'zuu-crew',
+                    'owner' : 'sahas',
                     'depends_on_past' : False,
                     'start_date': timezone.datetime(2025, 9, 14, 10, 0),
                     'email_on_failuer': False,
