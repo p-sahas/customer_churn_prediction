@@ -451,6 +451,8 @@ venv.bak/
 .env.local
 .env.*.local
 config.local.yaml
+.env.out
+env.out
 
 # IDEs
 .vscode/
