@@ -37,9 +37,6 @@ with DAG(
         ) as dag:
     
 
-19.00
-
-
 
 
     # Step 1

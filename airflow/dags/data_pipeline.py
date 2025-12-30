@@ -3,6 +3,13 @@ from airflow import DAG
 from datetime import datetime, timedelta
 from airflow.providers.docker.operators.docker import DockerOperator
 
+
+# from airflow import DAG
+# from airflow.utils import timezone
+# from airflow.operators.python import PythonOperator
+# from utils.airflow_tasks import validate_input_data, run_data_pipeline
+
+
 default_arguments = {
                     'owner' : 'sahas',
                     'depends_on_past' : False,
@@ -24,19 +31,24 @@ with DAG(
         description='Data Pipeline Local - DockerOperater',
         tags=['pyspark', 'mllib', 'mlflow', 'batch-processing']
         ) as dag:
-    
-    # Step 1
-    validate_input_data_task = PythonOperator(
-                                            task_id='validate_input_data',
-                                            python_callable=validate_input_data,
-                                            execution_timeout=timedelta(minutes=2)
-                                            )
 
-    # Step 2
-    run_data_pipeline_task = PythonOperator(
-                                            task_id='run_data_pipeline',
-                                            python_callable=run_data_pipeline,
-                                            execution_timeout=timedelta(minutes=15)
-                                            )
+    run_data_pipeline = DockerOperator(
+                            task_id="run_data_pipeline",
+                            image="churn-pipeline/data:latest"
+                                )
 
-    validate_input_data_task >> run_data_pipeline_task
+    # # Step 1
+    # validate_input_data_task = PythonOperator(
+    #                                         task_id='validate_input_data',
+    #                                         python_callable=validate_input_data,
+    #                                         execution_timeout=timedelta(minutes=2)
+    #                                         )
+
+    # # Step 2
+    # run_data_pipeline_task = PythonOperator(
+    #                                         task_id='run_data_pipeline',
+    #                                         python_callable=run_data_pipeline,
+    #                                         execution_timeout=timedelta(minutes=15)
+    #                                         )
+
+    # validate_input_data_task >> run_data_pipeline_task
