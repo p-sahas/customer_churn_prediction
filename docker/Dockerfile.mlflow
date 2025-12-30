@@ -24,7 +24,7 @@ RUN pip install --no-cache-dir -r requirements-mlflow.txt
 RUN mkdir -p /app/mlflow && chmod 755 /app/mlflow && chown -R appuser:appuser /app
 
 # Copy entrypoint script
-COPY docker/mlflow-tracking/entrypoint.sh /entrypoint.sh
+COPY docker/mlflow-entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 # Switch to non-root user
