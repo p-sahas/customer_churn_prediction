@@ -437,6 +437,8 @@ airflow-init:
 	@echo ""
 	@echo "📦 Creating fresh LOCAL Airflow database and admin user (admin/admin)..."
 	@echo "   (Using LOCAL PostgreSQL container - NOT RDS)"
+	@echo "💡 Ensuring custom Airflow image exists..."
+	@sh -c 'if [ -z "$$(docker images -q churn-pipeline/airflow:2.8.1-amazon)" ]; then $(MAKE) airflow-build; else echo "✅ Custom Airflow image exists, skipping build"; fi'
 	@set -e; \
 	docker network create churn-pipeline-network >/dev/null 2>&1 || true; \
 	docker rm -f airflow-init >/dev/null 2>&1 || true; \
