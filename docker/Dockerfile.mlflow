@@ -1,7 +1,7 @@
 # MLflow Tracking Server
 FROM python:3.11-slim
 
-LABEL org.opencontainers.image.source="https://github.com/zuucrew/ml-pipeline"
+LABEL org.opencontainers.image.source="https://github.com/p-sahas/customer_churn_prediction"
 LABEL org.opencontainers.image.version="1.0.0"
 LABEL org.opencontainers.image.description="MLflow Tracking Server with S3 backend"
 
@@ -34,7 +34,7 @@ USER appuser
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     MLFLOW_BACKEND_STORE_URI=file:///tmp/mlruns \
-    MLFLOW_DEFAULT_ARTIFACT_ROOT=s3://\${S3_BUCKET:-zuucrew-mlflow-artifacts-prod}/mlflow-artifacts \
+    MLFLOW_DEFAULT_ARTIFACT_ROOT=s3://\${S3_BUCKET:-customer-churn-prediction-sahas-zuucrew}/mlflow-artifacts \
     GIT_PYTHON_REFRESH=quiet
 
 # Expose MLflow port

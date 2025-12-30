@@ -2,7 +2,7 @@
 # This serves as the foundation for all ML pipeline services with embedded PySpark
 FROM eclipse-temurin:17-jre AS ml-base
 
-LABEL org.opencontainers.image.source="https://github.com/zuucrew/ml-pipeline"
+LABEL org.opencontainers.image.source="https://github.com/p-sahas/customer_churn_prediction"
 LABEL org.opencontainers.image.version="1.0.0"
 LABEL org.opencontainers.image.description="Base ML Pipeline with embedded PySpark and S3 integration"
 

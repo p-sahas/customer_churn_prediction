@@ -5,15 +5,13 @@ scikit-learn>=1.1.0
 scipy>=1.9.0
 
 # Distributed Data Processing
-pyspark>=3.5.0
+pyspark>=3.4.0
+pyspark[sql]>=3.4.0
+pyspark[ml]>=3.4.0
 
-
-# ML Pipeline (ZenML will be added back later)
-# zenml>=0.50.0
-# zenml[server]>=0.50.0
 
 # Model Libraries
-xgboost>=1.6.0
+xgboost>=2.1.0
 lightgbm>=3.3.0
 
 # Visualization Libraries
