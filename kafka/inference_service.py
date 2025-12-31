@@ -10,9 +10,9 @@ import argparse
 import os
 import sys
 import time
-import psycopg2
 from typing import Dict, Any, List
-from datetime import datetime
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 # Add project root to path
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -21,6 +21,7 @@ sys.path.insert(0, project_root)
 from confluent_kafka import Consumer, Producer, KafkaError
 from src.model_inference import ModelInference
 from utils.config import load_config
+from utils.db_manager import DatabaseManager
 
 # Configure logging
 logging.basicConfig(
@@ -48,13 +49,16 @@ RDS_DB = RDS_CONFIG.get('database', os.getenv('RDS_DB_NAME'))
 RDS_USER = RDS_CONFIG.get('username', os.getenv('RDS_USERNAME'))
 RDS_PASSWORD = RDS_CONFIG.get('password', os.getenv('RDS_PASSWORD'))
 
+# SQLite fallback configuration (default: True for local dev, False for ECS production)
+USE_SQLITE_FALLBACK = os.getenv('USE_SQLITE_FALLBACK', 'true').lower() in ('true', '1', 'yes')
+
 
 class ChurnInferenceConsumer:
     """Real-time churn inference consumer with micro-batch processing"""
     
     def __init__(self):
         self.model = None
-        self.db_conn = None
+        self.db_manager = None
         self.producer = None
         
     def initialize(self):
@@ -66,24 +70,23 @@ class ChurnInferenceConsumer:
             logger.info("=" * 60)
             
             logger.info("Loading sklearn model from S3/MLflow...")
-            model_path = "artifacts/models/churn_model"  # Base path
+            # Use unified timestamp structure: artifacts/train/{timestamp}/churn_model.pkl
+            # ModelInference will automatically find the latest timestamp
+            model_path = "artifacts/train/churn_model"  # Base path (timestamp auto-resolved)
             self.model = ModelInference(model_path=model_path, use_spark=False)
             logger.info("✅ ML model loaded successfully")
             
-            # Initialize RDS connection
-            if all([RDS_HOST, RDS_DB, RDS_USER, RDS_PASSWORD]):
-                logger.info(f"Connecting to RDS: {RDS_HOST}:{RDS_PORT}/{RDS_DB}")
-                self.db_conn = psycopg2.connect(
-                    host=RDS_HOST,
-                    port=RDS_PORT,
-                    database=RDS_DB,
-                    user=RDS_USER,
-                    password=RDS_PASSWORD
-                )
-                self.db_conn.autocommit = True
-                logger.info("✅ RDS connection established")
-            else:
-                logger.warning("⚠️  RDS credentials not configured - predictions will not be saved to database")
+            # Initialize database connection (RDS with optional SQLite fallback)
+            logger.info(f"🔧 SQLite fallback: {'ENABLED' if USE_SQLITE_FALLBACK else 'DISABLED (production mode)'}")
+            self.db_manager = DatabaseManager(
+                rds_host=RDS_HOST,
+                rds_port=RDS_PORT,
+                rds_database=RDS_DB,
+                rds_user=RDS_USER,
+                rds_password=RDS_PASSWORD,
+                use_sqlite_fallback=USE_SQLITE_FALLBACK
+            )
+            logger.info(f"✅ Database connection established ({self.db_manager.get_db_type().upper()})")
             
             # Initialize Kafka producer for predictions
             self.producer = Producer({'bootstrap.servers': BOOTSTRAP_SERVERS})
@@ -119,12 +122,13 @@ class ChurnInferenceConsumer:
         }
     
     def write_prediction_to_rds(self, customer_id: str, customer_data: Dict, prediction_result: Dict, event_id: str = None):
-        """Write individual prediction to RDS"""
-        if not self.db_conn:
+        """Write individual prediction to database (RDS or SQLite)"""
+        if not self.db_manager:
             return
         
         try:
-            cursor = self.db_conn.cursor()
+            # Ensure connection is alive
+            self.db_manager.ensure_connection()
             
             # Parse prediction
             status = prediction_result.get('Status', 'Unknown')
@@ -147,27 +151,37 @@ class ChurnInferenceConsumer:
             # Get model version (if available)
             model_version = "sklearn_v1.0"  # TODO: Get from model metadata
             
-            # Insert prediction
-            insert_query = """
-                INSERT INTO churn_predictions (
-                    customer_id, prediction, probability, risk_score,
-                    predicted_at, model_version, geography, gender, age, tenure,
-                    balance, num_of_products, has_cr_card, is_active_member,
-                    estimated_salary, event_id
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (event_id) DO NOTHING
-            """
+            # Insert prediction (handle both PostgreSQL and SQLite syntax)
+            if self.db_manager.get_db_type() == 'rds':
+                # PostgreSQL syntax with ON CONFLICT
+                insert_query = """
+                    INSERT INTO churn_predictions (
+                        customer_id, prediction, probability, risk_score,
+                        predicted_at, model_version, geography, gender, age, tenure,
+                        balance, num_of_products, has_cr_card, is_active_member,
+                        estimated_salary, event_id
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (event_id) DO NOTHING
+                """
+            else:
+                # SQLite syntax with INSERT OR IGNORE
+                insert_query = """
+                    INSERT OR IGNORE INTO churn_predictions (
+                        customer_id, prediction, probability, risk_score,
+                        predicted_at, model_version, geography, gender, age, tenure,
+                        balance, num_of_products, has_cr_card, is_active_member,
+                        estimated_salary, event_id
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """
             
-            cursor.execute(insert_query, (
+            self.db_manager.execute(insert_query, (
                 str(customer_id), prediction_value, probability, risk_score,
-                datetime.utcnow(), model_version, geography, gender, age, tenure,
+                datetime.now(ZoneInfo("Asia/Kolkata")).isoformat(), model_version, geography, gender, age, tenure,
                 balance, num_products, has_cr_card, is_active, salary, event_id
             ))
             
-            cursor.close()
-            
         except Exception as e:
-            logger.error(f"Failed to write prediction to RDS: {e}")
+            logger.error(f"Failed to write prediction to database: {e}")
     
     def process_batch(self, max_messages: int = BATCH_SIZE, timeout: int = TIMEOUT_SECONDS, 
                      group_id: str = None) -> int:
@@ -259,7 +273,7 @@ class ChurnInferenceConsumer:
                     'gender': customer_data.get('Gender'),
                     'age': customer_data.get('Age'),
                     'balance': customer_data.get('Balance'),
-                    'processed_at': datetime.utcnow().isoformat(),
+                    'processed_at': datetime.now(ZoneInfo("Asia/Kolkata")).isoformat(),
                     'event_id': event_id,
                     'model_version': 'sklearn_v1.0'
                 }

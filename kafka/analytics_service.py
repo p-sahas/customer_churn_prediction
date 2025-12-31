@@ -9,7 +9,6 @@ import logging
 import os
 import sys
 import time
-import psycopg2
 from datetime import datetime, timedelta
 from typing import Dict, Any
 from collections import defaultdict
@@ -20,6 +19,7 @@ sys.path.insert(0, project_root)
 
 from confluent_kafka import Consumer, KafkaError
 from utils.config import load_config
+from utils.db_manager import DatabaseManager
 
 # Configure logging
 logging.basicConfig(
@@ -44,6 +44,9 @@ RDS_DB = RDS_CONFIG.get('database', os.getenv('RDS_DB_NAME'))
 RDS_USER = RDS_CONFIG.get('username', os.getenv('RDS_USERNAME'))
 RDS_PASSWORD = RDS_CONFIG.get('password', os.getenv('RDS_PASSWORD'))
 
+# SQLite fallback configuration (default: True for local dev, False for ECS production)
+USE_SQLITE_FALLBACK = os.getenv('USE_SQLITE_FALLBACK', 'true').lower() in ('true', '1', 'yes')
+
 # Analytics configuration
 ANALYTICS_CONFIG = config.get('analytics', {})
 AGGREGATION_INTERVAL = ANALYTICS_CONFIG.get('aggregation_interval', 3600)  # 1 hour
@@ -54,7 +57,7 @@ class ChurnAnalyticsService:
     """Real-time churn prediction analytics service"""
     
     def __init__(self):
-        self.db_conn = None
+        self.db_manager = None
         self.last_hourly_aggregation = None
         self.last_daily_aggregation = None
         
@@ -65,20 +68,17 @@ class ChurnAnalyticsService:
             logger.info("INITIALIZING CHURN ANALYTICS SERVICE")
             logger.info("=" * 60)
             
-            if not all([RDS_HOST, RDS_DB, RDS_USER, RDS_PASSWORD]):
-                logger.error("❌ RDS credentials not configured")
-                return False
-            
-            logger.info(f"Connecting to RDS: {RDS_HOST}:{RDS_PORT}/{RDS_DB}")
-            self.db_conn = psycopg2.connect(
-                host=RDS_HOST,
-                port=RDS_PORT,
-                database=RDS_DB,
-                user=RDS_USER,
-                password=RDS_PASSWORD
+            # Initialize database connection (RDS with optional SQLite fallback)
+            logger.info(f"🔧 SQLite fallback: {'ENABLED' if USE_SQLITE_FALLBACK else 'DISABLED (production mode)'}")
+            self.db_manager = DatabaseManager(
+                rds_host=RDS_HOST,
+                rds_port=RDS_PORT,
+                rds_database=RDS_DB,
+                rds_user=RDS_USER,
+                rds_password=RDS_PASSWORD,
+                use_sqlite_fallback=USE_SQLITE_FALLBACK
             )
-            self.db_conn.autocommit = True
-            logger.info("✅ RDS connection established")
+            logger.info(f"✅ Database connection established ({self.db_manager.get_db_type().upper()})")
             
             logger.info("=" * 60)
             return True
@@ -105,74 +105,47 @@ class ChurnAnalyticsService:
     
     def ensure_connection(self):
         """Ensure database connection is alive, reconnect if needed"""
-        try:
-            # Check if connection exists and is alive
-            if self.db_conn is None or self.db_conn.closed:
-                logger.warning("⚠️  Database connection lost, reconnecting...")
-                self.db_conn = psycopg2.connect(
-                    host=RDS_HOST,
-                    port=RDS_PORT,
-                    database=RDS_DB,
-                    user=RDS_USER,
-                    password=RDS_PASSWORD
-                )
-                self.db_conn.autocommit = True
-                logger.info("✅ Database connection restored")
-                return True
-            
-            # Test connection with a simple query
-            cursor = self.db_conn.cursor()
-            cursor.execute("SELECT 1")
-            cursor.close()
+        if self.db_manager:
+            self.db_manager.ensure_connection()
             return True
-            
-        except Exception as e:
-            logger.error(f"Failed to ensure connection: {e}")
-            # Try to reconnect
-            try:
-                self.db_conn = psycopg2.connect(
-                    host=RDS_HOST,
-                    port=RDS_PORT,
-                    database=RDS_DB,
-                    user=RDS_USER,
-                    password=RDS_PASSWORD
-                )
-                self.db_conn.autocommit = True
-                logger.info("✅ Database connection restored")
-                return True
-            except Exception as reconnect_error:
-                logger.error(f"Failed to reconnect: {reconnect_error}")
-                return False
+        return False
     
     def write_high_risk_alert(self, prediction: Dict[str, Any]):
-        """Write high-risk customer alert to RDS"""
+        """Write high-risk customer alert to database (RDS or SQLite)"""
         try:
             # Ensure connection is alive
             if not self.ensure_connection():
                 logger.error("Cannot write high-risk alert: no database connection")
                 return
             
-            cursor = self.db_conn.cursor()
+            # Handle both PostgreSQL and SQLite syntax
+            if self.db_manager.get_db_type() == 'rds':
+                # PostgreSQL syntax with ON CONFLICT
+                insert_query = """
+                    INSERT INTO high_risk_customers (
+                        customer_id, risk_score, geography, gender, age, balance, detected_at
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (customer_id, detected_at) 
+                    DO UPDATE SET risk_score = EXCLUDED.risk_score
+                """
+            else:
+                # SQLite syntax with INSERT OR REPLACE
+                insert_query = """
+                    INSERT OR REPLACE INTO high_risk_customers (
+                        customer_id, risk_score, geography, gender, age, balance, detected_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """
             
-            insert_query = """
-                INSERT INTO high_risk_customers (
-                    customer_id, risk_score, geography, gender, age, balance, detected_at
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (customer_id, detected_at) 
-                DO UPDATE SET risk_score = EXCLUDED.risk_score
-            """
-            
-            cursor.execute(insert_query, (
+            self.db_manager.execute(insert_query, (
                 prediction.get('customer_id'),
                 prediction.get('risk_score'),
                 prediction.get('geography'),
                 prediction.get('gender'),
                 prediction.get('age'),
                 prediction.get('balance'),
-                datetime.utcnow()
+                datetime.utcnow().isoformat()
             ))
             
-            cursor.close()
             logger.info(f"🚨 High-risk alert: Customer {prediction.get('customer_id')} (risk: {prediction.get('risk_score'):.3f})")
             
         except Exception as e:
@@ -186,8 +159,6 @@ class ChurnAnalyticsService:
                 logger.error("Cannot aggregate hourly metrics: no database connection")
                 return
             
-            cursor = self.db_conn.cursor()
-            
             # Get current hour
             current_hour = datetime.utcnow().replace(minute=0, second=0, microsecond=0)
             
@@ -195,41 +166,68 @@ class ChurnAnalyticsService:
             if self.last_hourly_aggregation == current_hour:
                 return
             
-            # Aggregate from churn_predictions
-            aggregate_query = """
-                INSERT INTO churn_metrics_hourly (
-                    hour_timestamp, total_predictions, churn_count, churn_rate,
-                    avg_risk_score, high_risk_count, avg_age, avg_balance, avg_tenure
-                )
-                SELECT 
-                    DATE_TRUNC('hour', predicted_at) as hour_timestamp,
-                    COUNT(*) as total_predictions,
-                    SUM(prediction) as churn_count,
-                    ROUND((SUM(prediction)::float / COUNT(*)::float * 100)::numeric, 2) as churn_rate,
-                    ROUND(AVG(risk_score)::numeric, 4) as avg_risk_score,
-                    SUM(CASE WHEN risk_score >= %s THEN 1 ELSE 0 END) as high_risk_count,
-                    ROUND(AVG(age)::numeric, 1) as avg_age,
-                    ROUND(AVG(balance)::numeric, 2) as avg_balance,
-                    ROUND(AVG(tenure)::numeric, 1) as avg_tenure
-                FROM churn_predictions
-                WHERE predicted_at >= %s AND predicted_at < %s
-                GROUP BY DATE_TRUNC('hour', predicted_at)
-                ON CONFLICT (hour_timestamp) 
-                DO UPDATE SET
-                    total_predictions = EXCLUDED.total_predictions,
-                    churn_count = EXCLUDED.churn_count,
-                    churn_rate = EXCLUDED.churn_rate,
-                    avg_risk_score = EXCLUDED.avg_risk_score,
-                    high_risk_count = EXCLUDED.high_risk_count,
-                    avg_age = EXCLUDED.avg_age,
-                    avg_balance = EXCLUDED.avg_balance,
-                    avg_tenure = EXCLUDED.avg_tenure
-            """
-            
             hour_start = current_hour - timedelta(hours=1)
-            cursor.execute(aggregate_query, (HIGH_RISK_THRESHOLD, hour_start, current_hour))
             
-            cursor.close()
+            # Handle both PostgreSQL and SQLite syntax
+            if self.db_manager.get_db_type() == 'rds':
+                # PostgreSQL syntax with DATE_TRUNC and ON CONFLICT
+                aggregate_query = """
+                    INSERT INTO churn_metrics_hourly (
+                        hour_timestamp, total_predictions, churn_count, churn_rate,
+                        avg_risk_score, high_risk_count, avg_age, avg_balance, avg_tenure
+                    )
+                    SELECT 
+                        DATE_TRUNC('hour', predicted_at) as hour_timestamp,
+                        COUNT(*) as total_predictions,
+                        SUM(prediction) as churn_count,
+                        ROUND((SUM(prediction)::float / COUNT(*)::float * 100)::numeric, 2) as churn_rate,
+                        ROUND(AVG(risk_score)::numeric, 4) as avg_risk_score,
+                        SUM(CASE WHEN risk_score >= %s THEN 1 ELSE 0 END) as high_risk_count,
+                        ROUND(AVG(age)::numeric, 1) as avg_age,
+                        ROUND(AVG(balance)::numeric, 2) as avg_balance,
+                        ROUND(AVG(tenure)::numeric, 1) as avg_tenure
+                    FROM churn_predictions
+                    WHERE predicted_at >= %s AND predicted_at < %s
+                    GROUP BY DATE_TRUNC('hour', predicted_at)
+                    ON CONFLICT (hour_timestamp) 
+                    DO UPDATE SET
+                        total_predictions = EXCLUDED.total_predictions,
+                        churn_count = EXCLUDED.churn_count,
+                        churn_rate = EXCLUDED.churn_rate,
+                        avg_risk_score = EXCLUDED.avg_risk_score,
+                        high_risk_count = EXCLUDED.high_risk_count,
+                        avg_age = EXCLUDED.avg_age,
+                        avg_balance = EXCLUDED.avg_balance,
+                        avg_tenure = EXCLUDED.avg_tenure
+                """
+            else:
+                # SQLite syntax with strftime and INSERT OR REPLACE
+                aggregate_query = """
+                    INSERT OR REPLACE INTO churn_metrics_hourly (
+                        hour_timestamp, total_predictions, churn_count, churn_rate,
+                        avg_risk_score, high_risk_count, avg_age, avg_balance, avg_tenure
+                    )
+                    SELECT 
+                        strftime('%Y-%m-%d %H:00:00', predicted_at) as hour_timestamp,
+                        COUNT(*) as total_predictions,
+                        SUM(prediction) as churn_count,
+                        ROUND((SUM(prediction) * 1.0 / COUNT(*) * 100), 2) as churn_rate,
+                        ROUND(AVG(risk_score), 4) as avg_risk_score,
+                        SUM(CASE WHEN risk_score >= ? THEN 1 ELSE 0 END) as high_risk_count,
+                        ROUND(AVG(age), 1) as avg_age,
+                        ROUND(AVG(balance), 2) as avg_balance,
+                        ROUND(AVG(tenure), 1) as avg_tenure
+                    FROM churn_predictions
+                    WHERE predicted_at >= ? AND predicted_at < ?
+                    GROUP BY strftime('%Y-%m-%d %H:00:00', predicted_at)
+                """
+            
+            self.db_manager.execute(aggregate_query, (
+                HIGH_RISK_THRESHOLD, 
+                hour_start.isoformat(), 
+                current_hour.isoformat()
+            ))
+            
             self.last_hourly_aggregation = current_hour
             logger.info(f"📊 Hourly metrics aggregated for {hour_start.strftime('%Y-%m-%d %H:00')}")
             
@@ -244,8 +242,6 @@ class ChurnAnalyticsService:
                 logger.error("Cannot aggregate daily metrics: no database connection")
                 return
             
-            cursor = self.db_conn.cursor()
-            
             # Get current date
             current_date = datetime.utcnow().date()
             
@@ -253,41 +249,67 @@ class ChurnAnalyticsService:
             if self.last_daily_aggregation == current_date:
                 return
             
-            # Aggregate from churn_predictions
-            aggregate_query = """
-                INSERT INTO churn_metrics_daily (
-                    date, total_predictions, churn_count, churn_rate,
-                    avg_risk_score, high_risk_count, avg_age, avg_balance, avg_tenure
-                )
-                SELECT 
-                    DATE(predicted_at) as date,
-                    COUNT(*) as total_predictions,
-                    SUM(prediction) as churn_count,
-                    ROUND((SUM(prediction)::float / COUNT(*)::float * 100)::numeric, 2) as churn_rate,
-                    ROUND(AVG(risk_score)::numeric, 4) as avg_risk_score,
-                    SUM(CASE WHEN risk_score >= %s THEN 1 ELSE 0 END) as high_risk_count,
-                    ROUND(AVG(age)::numeric, 1) as avg_age,
-                    ROUND(AVG(balance)::numeric, 2) as avg_balance,
-                    ROUND(AVG(tenure)::numeric, 1) as avg_tenure
-                FROM churn_predictions
-                WHERE DATE(predicted_at) = %s
-                GROUP BY DATE(predicted_at)
-                ON CONFLICT (date) 
-                DO UPDATE SET
-                    total_predictions = EXCLUDED.total_predictions,
-                    churn_count = EXCLUDED.churn_count,
-                    churn_rate = EXCLUDED.churn_rate,
-                    avg_risk_score = EXCLUDED.avg_risk_score,
-                    high_risk_count = EXCLUDED.high_risk_count,
-                    avg_age = EXCLUDED.avg_age,
-                    avg_balance = EXCLUDED.avg_balance,
-                    avg_tenure = EXCLUDED.avg_tenure
-            """
-            
             yesterday = current_date - timedelta(days=1)
-            cursor.execute(aggregate_query, (HIGH_RISK_THRESHOLD, yesterday))
             
-            cursor.close()
+            # Handle both PostgreSQL and SQLite syntax
+            if self.db_manager.get_db_type() == 'rds':
+                # PostgreSQL syntax with DATE() and ON CONFLICT
+                aggregate_query = """
+                    INSERT INTO churn_metrics_daily (
+                        date, total_predictions, churn_count, churn_rate,
+                        avg_risk_score, high_risk_count, avg_age, avg_balance, avg_tenure
+                    )
+                    SELECT 
+                        DATE(predicted_at) as date,
+                        COUNT(*) as total_predictions,
+                        SUM(prediction) as churn_count,
+                        ROUND((SUM(prediction)::float / COUNT(*)::float * 100)::numeric, 2) as churn_rate,
+                        ROUND(AVG(risk_score)::numeric, 4) as avg_risk_score,
+                        SUM(CASE WHEN risk_score >= %s THEN 1 ELSE 0 END) as high_risk_count,
+                        ROUND(AVG(age)::numeric, 1) as avg_age,
+                        ROUND(AVG(balance)::numeric, 2) as avg_balance,
+                        ROUND(AVG(tenure)::numeric, 1) as avg_tenure
+                    FROM churn_predictions
+                    WHERE DATE(predicted_at) = %s
+                    GROUP BY DATE(predicted_at)
+                    ON CONFLICT (date) 
+                    DO UPDATE SET
+                        total_predictions = EXCLUDED.total_predictions,
+                        churn_count = EXCLUDED.churn_count,
+                        churn_rate = EXCLUDED.churn_rate,
+                        avg_risk_score = EXCLUDED.avg_risk_score,
+                        high_risk_count = EXCLUDED.high_risk_count,
+                        avg_age = EXCLUDED.avg_age,
+                        avg_balance = EXCLUDED.avg_balance,
+                        avg_tenure = EXCLUDED.avg_tenure
+                """
+            else:
+                # SQLite syntax with date() and INSERT OR REPLACE
+                aggregate_query = """
+                    INSERT OR REPLACE INTO churn_metrics_daily (
+                        date, total_predictions, churn_count, churn_rate,
+                        avg_risk_score, high_risk_count, avg_age, avg_balance, avg_tenure
+                    )
+                    SELECT 
+                        date(predicted_at) as date,
+                        COUNT(*) as total_predictions,
+                        SUM(prediction) as churn_count,
+                        ROUND((SUM(prediction) * 1.0 / COUNT(*) * 100), 2) as churn_rate,
+                        ROUND(AVG(risk_score), 4) as avg_risk_score,
+                        SUM(CASE WHEN risk_score >= ? THEN 1 ELSE 0 END) as high_risk_count,
+                        ROUND(AVG(age), 1) as avg_age,
+                        ROUND(AVG(balance), 2) as avg_balance,
+                        ROUND(AVG(tenure), 1) as avg_tenure
+                    FROM churn_predictions
+                    WHERE date(predicted_at) = ?
+                    GROUP BY date(predicted_at)
+                """
+            
+            self.db_manager.execute(aggregate_query, (
+                HIGH_RISK_THRESHOLD, 
+                yesterday.isoformat()
+            ))
+            
             self.last_daily_aggregation = current_date
             logger.info(f"📊 Daily metrics aggregated for {yesterday.strftime('%Y-%m-%d')}")
             
@@ -358,8 +380,8 @@ class ChurnAnalyticsService:
     
     def close(self):
         """Close database connection"""
-        if self.db_conn:
-            self.db_conn.close()
+        if self.db_manager:
+            self.db_manager.close()
         logger.info("✅ Analytics service shutdown complete")
 
 
