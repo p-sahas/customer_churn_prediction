@@ -2,7 +2,7 @@
 # This serves as the foundation for all ML pipeline services with embedded PySpark
 FROM eclipse-temurin:17-jre AS ml-base
 
-LABEL org.opencontainers.image.source="https://github.com/p-sahas/customer_churn_prediction"
+LABEL org.opencontainers.image.source="https://github.com/zuucrew/churn-pipeline"
 LABEL org.opencontainers.image.version="1.0.0"
 LABEL org.opencontainers.image.description="Base ML Pipeline with embedded PySpark and S3 integration"
 
@@ -34,6 +34,13 @@ COPY --chown=appuser:app src/ ./src/
 COPY --chown=appuser:app utils/ ./utils/
 COPY --chown=appuser:app pipelines/ ./pipelines/
 COPY --chown=appuser:app config.yaml .
+
+# Copy raw data for fallback (if S3 is unavailable)
+COPY --chown=appuser:app data/raw/ ./data/raw/
+
+# Create artifacts directory for local storage (when USE_S3=false)
+RUN mkdir -p ./artifacts/data ./artifacts/train ./artifacts/mlflow ./artifacts/inference_artifacts && \
+    chown -R appuser:app ./artifacts
 
 # Copy shared entrypoint script
 COPY docker/entrypoint-template.sh /entrypoint.sh
@@ -69,7 +76,7 @@ ENV PIPELINE_TYPE=data \
 
 # Health check
 HEALTHCHECK --interval=60s --timeout=30s --start-period=120s --retries=2 \
-    CMD python3 -c "import boto3, os; boto3.client('s3').head_bucket(Bucket=os.environ.get('S3_BUCKET', 'zuucrew-mlflow-artifacts-prod'))" || exit 1
+    CMD python3 -c "import boto3, os; boto3.client('s3').head_bucket(Bucket=os.environ['S3_BUCKET'])" || exit 1
 
 ENTRYPOINT ["bash", "/entrypoint.sh"]
 
@@ -88,7 +95,7 @@ ENV PIPELINE_TYPE=model \
 
 # Health check
 HEALTHCHECK --interval=60s --timeout=30s --start-period=180s --retries=2 \
-    CMD python3 -c "import boto3, mlflow, os; boto3.client('s3').head_bucket(Bucket=os.environ.get('S3_BUCKET', 'zuucrew-mlflow-artifacts-prod'))" || exit 1
+    CMD python3 -c "import boto3, mlflow, os; boto3.client('s3').head_bucket(Bucket=os.environ['S3_BUCKET'])" || exit 1
 
 ENTRYPOINT ["bash", "/entrypoint.sh"]
 
@@ -107,6 +114,6 @@ ENV PIPELINE_TYPE=inference \
 
 # Health check
 HEALTHCHECK --interval=60s --timeout=30s --start-period=240s --retries=2 \
-    CMD python3 -c "import boto3, mlflow, os; boto3.client('s3').head_bucket(Bucket=os.environ.get('S3_BUCKET', 'zuucrew-mlflow-artifacts-prod'))" || exit 1
+    CMD python3 -c "import boto3, mlflow, os; boto3.client('s3').head_bucket(Bucket=os.environ['S3_BUCKET'])" || exit 1
 
 ENTRYPOINT ["bash", "/entrypoint.sh"]

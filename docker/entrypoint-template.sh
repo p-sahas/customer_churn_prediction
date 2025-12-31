@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -eo pipefail
+
+# Enable debugging (shows each command before execution)
+set -x
 
 # ================================
 # Embedded Spark ML Pipeline Entrypoint
@@ -11,14 +14,30 @@ set -euo pipefail
 # - PIPELINE_NAME: human-readable pipeline name
 # - PIPELINE_EMOJI: emoji for logging
 
-echo "${PIPELINE_EMOJI:-🚀} Starting ${PIPELINE_NAME:-ML Pipeline} Service (Embedded Spark)..."
-echo "whoami: $(whoami)"
-echo "HOME: $HOME"
-mkdir -p "$HOME/.cache" "$HOME/.ivy2" "$HOME/.config" "$SPARK_LOCAL_DIRS" /tmp/hadoop
+echo "═══════════════════════════════════════════════════════"
+echo "🚀 ENTRYPOINT SCRIPT STARTED"
+echo "═══════════════════════════════════════════════════════"
+echo "Pipeline Type: ${PIPELINE_TYPE:-NOT_SET}"
+echo "Pipeline Name: ${PIPELINE_NAME:-NOT_SET}"
+echo "Pipeline Script: ${PIPELINE_SCRIPT:-NOT_SET}"
+echo "User: $(whoami)"
+echo "HOME: ${HOME:-NOT_SET}"
+echo "SPARK_LOCAL_DIRS: ${SPARK_LOCAL_DIRS:-NOT_SET}"
+echo "AWS_REGION: ${AWS_REGION:-NOT_SET}"
+echo "S3_BUCKET: ${S3_BUCKET:-NOT_SET}"
+echo "═══════════════════════════════════════════════════════"
+
+mkdir -p "${HOME}/.cache" "${HOME}/.ivy2" "${HOME}/.config" "${SPARK_LOCAL_DIRS}" /tmp/hadoop || {
+    echo "ERROR: Failed to create directories"
+    exit 1
+}
 
 # Set containerized environment variable for MLflow URL detection
 export CONTAINERIZED=true
 echo "🐳 Environment: Containerized (CONTAINERIZED=true)"
+
+# Default: skip MLflow unless explicitly disabled
+export SKIP_MLFLOW=${SKIP_MLFLOW:-true}
 
 # ================================
 # AWS Credentials Setup
@@ -118,11 +137,17 @@ from botocore.exceptions import NoCredentialsError, ClientError
 
 try:
     s3 = boto3.client('s3')
-    response = s3.list_objects_v2(Bucket='${S3_BUCKET}', Prefix='artifacts/data_artifacts/', MaxKeys=1)
+    # Check unified structure first
+    response = s3.list_objects_v2(Bucket='${S3_BUCKET}', Prefix='artifacts/data/', MaxKeys=1)
     if 'Contents' in response:
-        print('✅ Data artifacts found in S3')
+        print('✅ Data artifacts found in S3 (unified structure)')
     else:
-        print('⚠️ No data artifacts found - will use fallback data loading')
+        # Fallback to old structure
+        response = s3.list_objects_v2(Bucket='${S3_BUCKET}', Prefix='artifacts/data_artifacts/', MaxKeys=1)
+        if 'Contents' in response:
+            print('⚠️ Data artifacts found in OLD structure - consider migration')
+        else:
+            print('⚠️ No data artifacts found - will use fallback data loading')
 except Exception as e:
     print(f'⚠️ Could not check S3 data artifacts: {e}')
     print('   Continuing with pipeline...')
@@ -139,19 +164,29 @@ from botocore.exceptions import NoCredentialsError, ClientError
 try:
     s3 = boto3.client('s3')
     
-    # Check for model artifacts
-    model_response = s3.list_objects_v2(Bucket='${S3_BUCKET}', Prefix='artifacts/train_artifacts/', MaxKeys=1)
+    # Check for model artifacts (unified structure)
+    model_response = s3.list_objects_v2(Bucket='${S3_BUCKET}', Prefix='artifacts/train/', MaxKeys=1)
     if 'Contents' in model_response:
-        print('✅ Model artifacts found in S3')
+        print('✅ Model artifacts found in S3 (unified structure)')
     else:
-        print('⚠️ No model artifacts found in S3')
+        # Fallback to old structure
+        model_response = s3.list_objects_v2(Bucket='${S3_BUCKET}', Prefix='artifacts/train_artifacts/', MaxKeys=1)
+        if 'Contents' in model_response:
+            print('⚠️ Model artifacts found in OLD structure - consider migration')
+        else:
+            print('⚠️ No model artifacts found in S3')
     
-    # Check for data artifacts
-    data_response = s3.list_objects_v2(Bucket='${S3_BUCKET}', Prefix='artifacts/data_artifacts/', MaxKeys=1)
+    # Check for data artifacts (unified structure)
+    data_response = s3.list_objects_v2(Bucket='${S3_BUCKET}', Prefix='artifacts/data/', MaxKeys=1)
     if 'Contents' in data_response:
-        print('✅ Data artifacts found in S3')
+        print('✅ Data artifacts found in S3 (unified structure)')
     else:
-        print('⚠️ No data artifacts found in S3')
+        # Fallback to old structure
+        data_response = s3.list_objects_v2(Bucket='${S3_BUCKET}', Prefix='artifacts/data_artifacts/', MaxKeys=1)
+        if 'Contents' in data_response:
+            print('⚠️ Data artifacts found in OLD structure - consider migration')
+        else:
+            print('⚠️ No data artifacts found in S3')
         
 except Exception as e:
     print(f'⚠️ Could not check S3 artifacts: {e}')
@@ -169,13 +204,27 @@ main() {
     echo "☁️ S3 Bucket: ${S3_BUCKET}"
     echo "📍 MLflow Tracking: ${MLFLOW_TRACKING_URI}"
     
-    wait_for_mlflow
+    # Only wait for MLflow if needed (model/inference pipelines) and not explicitly skipped
+    if { [ "${PIPELINE_TYPE}" = "model" ] || [ "${PIPELINE_TYPE}" = "inference" ]; } && \
+       [ "${SKIP_MLFLOW,,}" != "true" ]; then
+        wait_for_mlflow
+    elif [ "${SKIP_MLFLOW,,}" = "true" ]; then
+        echo "⏩ SKIP_MLFLOW=true detected - skipping MLflow readiness and logging"
+    else
+        echo "⏩ Skipping MLflow check for ${PIPELINE_TYPE} pipeline"
+    fi
+    
     configure_spark
     setup_pipeline_specific
     
-    # Run the specific pipeline
+    # Run the specific pipeline with any passed arguments
     echo "🚀 Starting ${PIPELINE_NAME} pipeline with embedded Spark..."
-    exec python3 "${PIPELINE_SCRIPT}"
+    if [ $# -gt 0 ]; then
+        echo "   Command: $@"
+        exec "$@"
+    else
+        exec python3 "${PIPELINE_SCRIPT}"
+    fi
 }
 
 # Execute main function
