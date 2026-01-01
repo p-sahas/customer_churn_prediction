@@ -10,11 +10,24 @@ from typing import Optional, List, Union
 from dotenv import load_dotenv
 from pydantic import BaseModel
 from abc import ABC, abstractmethod
-import pandas as pd  # Keep for educational comparison
-from pyspark.sql import DataFrame, SparkSession
-from pyspark.sql import functions as F
-from pyspark.sql.types import StringType
-from pyspark.ml.feature import Imputer
+import pandas as pd
+# Manual PySpark availability flag - set to False to prioritize pandas
+PYSPARK_AVAILABLE = False  # Set to True to enable PySpark, False for pandas-only
+
+# Conditional PySpark imports
+if PYSPARK_AVAILABLE:
+    try:
+        from pyspark.sql import DataFrame as SparkDataFrame, SparkSession
+        from pyspark.sql import functions as F
+        from pyspark.sql.types import StringType
+        from pyspark.ml.feature import object
+    except ImportError:
+        PYSPARK_AVAILABLE = False
+        SparkDataFrame = None
+        SparkSession = None
+else:
+    SparkDataFrame = None
+    SparkSession = None
 from utils.spark_session import get_or_create_spark_session
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -30,7 +43,7 @@ class MissingValueHandlingStrategy(ABC):
         self.spark = spark or get_or_create_spark_session()
     
     @abstractmethod
-    def handle(self, df: DataFrame) -> DataFrame:
+    def handle(self, df: Union[pd.DataFrame, object]) -> Union[pd.DataFrame, object]:
         """Handle missing values in the DataFrame."""
         pass
 
@@ -50,7 +63,7 @@ class DropMissingValuesStrategy(MissingValueHandlingStrategy):
         self.critical_columns = critical_columns or []
         logger.info(f"Initialized DropMissingValuesStrategy for columns: {self.critical_columns}")
 
-    def handle(self, df: DataFrame) -> DataFrame:
+    def handle(self, df: Union[pd.DataFrame, object]) -> Union[pd.DataFrame, object]:
         """
         Drop rows with missing values in critical columns.
         
@@ -60,29 +73,17 @@ class DropMissingValuesStrategy(MissingValueHandlingStrategy):
         Returns:
             DataFrame with rows dropped
         """
-        ############### PANDAS CODES ###########################
-        # initial_count = len(df)
+            # initial_count = len(df)
         
-        ############### PYSPARK CODES ###########################
         initial_count = df.count()
         
         if self.critical_columns:
-            ############### PANDAS CODES ###########################
-            # df_cleaned = df.dropna(subset=self.critical_columns)
-            
-            ############### PYSPARK CODES ###########################
-            # Drop rows where any critical column has null
             df_cleaned = df.dropna(subset=self.critical_columns)
         else:
             # Drop rows with any null values
             df_cleaned = df.dropna()
         
-        ############### PANDAS CODES ###########################
-        # final_count = len(df_cleaned)
-        # n_dropped = initial_count - final_count
-        
-        ############### PYSPARK CODES ###########################
-        final_count = df_cleaned.count()
+            final_count = df_cleaned.count()
         n_dropped = initial_count - final_count
         
         logger.info(f"✓ Dropped {n_dropped} rows with missing values")
@@ -105,8 +106,8 @@ class GenderPrediction(BaseModel):
     pred_gender: Gender
 
 
-class GenderImputer:
-    """Imputer that uses Groq API to predict gender based on names."""
+class Genderobject:
+    """object that uses Groq API to predict gender based on names."""
     
     def __init__(self):
         """Initialize with Groq client."""
@@ -161,7 +162,7 @@ class GenderImputer:
             logger.error(f"Error predicting gender for {firstname} {lastname}: {str(e)}")
             return None
     
-    def impute(self, df: DataFrame) -> DataFrame:
+    def impute(self, df: Union[pd.DataFrame, object]) -> Union[pd.DataFrame, object]:
         """
         Impute missing gender values using API predictions.
         
@@ -171,17 +172,6 @@ class GenderImputer:
         Returns:
             DataFrame with imputed gender values
         """
-        ############### PANDAS CODES ###########################
-        # missing_gender_index = df['Gender'].isnull()
-        # for idx in df[missing_gender_index].index:
-        #     first_name = df.loc[idx, 'Firstname']
-        #     last_name = df.loc[idx, 'Lastname']
-        #     gender = self._predict_gender(first_name, last_name)
-        #     if gender:
-        #         df.loc[idx, 'Gender'] = gender
-        
-        ############### PYSPARK CODES ###########################
-        # Create a UDF for gender prediction
         predict_gender_udf = F.udf(self._predict_gender, StringType())
         
         # Identify rows with missing gender
@@ -257,7 +247,7 @@ class FillMissingValuesStrategy(MissingValueHandlingStrategy):
         self.is_custom_imputer = is_custom_imputer
         self.custom_imputer = custom_imputer
 
-    def handle(self, df: DataFrame) -> DataFrame:
+    def handle(self, df: Union[pd.DataFrame, object]) -> Union[pd.DataFrame, object]:
         """
         Fill missing values based on the configured strategy.
         
@@ -273,36 +263,18 @@ class FillMissingValuesStrategy(MissingValueHandlingStrategy):
         if self.relevant_column:
             # Fill specific column
             if self.method == 'mean':
-                ############### PANDAS CODES ###########################
-                # mean_value = df[self.relevant_column].mean()
-                # df_filled = df.fillna({self.relevant_column: mean_value})
-                
-                ############### PYSPARK CODES ###########################
-                # Calculate mean for the column
                 mean_value = df.select(F.mean(F.col(self.relevant_column))).collect()[0][0]
                 df_filled = df.fillna({self.relevant_column: mean_value})
                 
                 logger.info(f'✓ Filled missing values in {self.relevant_column} with mean: {mean_value:.2f}')
                 
             elif self.method == 'median':
-                ############### PANDAS CODES ###########################
-                # median_value = df[self.relevant_column].median()
-                # df_filled = df.fillna({self.relevant_column: median_value})
-                
-                ############### PYSPARK CODES ###########################
-                # Calculate median for the column
                 median_value = df.approxQuantile(self.relevant_column, [0.5], 0.01)[0]
                 df_filled = df.fillna({self.relevant_column: median_value})
                 
                 logger.info(f'✓ Filled missing values in {self.relevant_column} with median: {median_value:.2f}')
                 
             elif self.method == 'mode':
-                ############### PANDAS CODES ###########################
-                # mode_value = df[self.relevant_column].mode()[0]
-                # df_filled = df.fillna({self.relevant_column: mode_value})
-                
-                ############### PYSPARK CODES ###########################
-                # Calculate mode for the column
                 mode_value = df.groupBy(self.relevant_column).count() \
                     .orderBy(F.desc('count')).first()[0]
                 df_filled = df.fillna({self.relevant_column: mode_value})
@@ -322,12 +294,12 @@ class FillMissingValuesStrategy(MissingValueHandlingStrategy):
                 df_filled = df.fillna(self.fill_value)
                 logger.info(f'✓ Filled all missing values with constant: {self.fill_value}')
             else:
-                # Use Spark ML Imputer for mean/median on all numeric columns
+                # Use Spark ML object for mean/median on all numeric columns
                 numeric_cols = [field.name for field in df.schema.fields 
                               if field.dataType.typeName() in ['integer', 'long', 'float', 'double']]
                 
                 if numeric_cols:
-                    imputer = Imputer(
+                    imputer = object(
                         inputCols=numeric_cols,
                         outputCols=[f"{col}_imputed" for col in numeric_cols],
                         strategy=self.method if self.method in ['mean', 'median'] else 'mean'
