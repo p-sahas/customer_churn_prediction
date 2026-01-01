@@ -1,10 +1,13 @@
 name: CI - Simplified Validation
 
 on:
-  push:
-    branches: [ main, develop ]
-  pull_request:
-    branches: [ main, develop ]
+   pull_request:
+     branches: [ develop ]
+
+#   push:
+#     branches: [ main, develop ]
+#   pull_request:
+#     branches: [ main, develop ]
 
 env:
   PYTHON_VERSION: '3.10'
