@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from typing import Dict, Any
+from typing import Union, Union, Dict, Any
 import logging
 from sklearn.metrics import (
     accuracy_score,
@@ -11,9 +11,22 @@ from sklearn.metrics import (
 )
 
 # PySpark imports
-from pyspark.sql import DataFrame
-from pyspark.ml import PipelineModel
-from pyspark.ml.evaluation import BinaryClassificationEvaluator, MulticlassClassificationEvaluator
+# Manual PySpark availability flag - set to False to prioritize scikit-learn
+PYSPARK_AVAILABLE = False  # Set to True to enable PySpark, False for sklearn-only
+
+# Conditional PySpark imports
+if PYSPARK_AVAILABLE:
+    try:
+        from pyspark.sql import DataFrame as SparkDataFrame
+        from pyspark.ml import PipelineModel
+        from pyspark.ml.evaluation import BinaryClassificationEvaluator, MulticlassClassificationEvaluator
+    except ImportError:
+        PYSPARK_AVAILABLE = False
+        SparkDataFrame = None
+        PipelineModel = None
+else:
+    SparkDataFrame = None
+    PipelineModel = None
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -57,21 +70,17 @@ class ModelEvaluator:
         return self.evaluation_results
 
 
-# ========================================================================================
-# PYSPARK MLLIB MODEL EVALUATOR - Simple version matching original structure
-# ========================================================================================
-
 class SparkModelEvaluator:
     """
     PySpark MLlib model evaluator - simplified to match original ModelEvaluator structure.
     """
     
-    def __init__(self, model: PipelineModel, model_name: str):
+    def __init__(self, model: object, model_name: str):
         self.model = model
         self.model_name = model_name
         self.evaluation_results = {}
 
-    def evaluate(self, test_data: DataFrame):
+    def evaluate(self, test_data: Union[pd.DataFrame, object]):
         """Evaluate PySpark MLlib model performance."""
         logger.info(f"Evaluating {self.model_name} model...")
         
