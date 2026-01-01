@@ -6,11 +6,23 @@ import numpy as np
 import pandas as pd
 from typing import Any, Tuple, Union
 from sklearn.base import BaseEstimator
-import sys
-# PySpark imports
-from pyspark.sql import DataFrame, SparkSession
-from pyspark.ml import Pipeline, PipelineModel
-from pyspark.ml.feature import VectorAssembler
+
+# Manual PySpark availability flag - set to False to prioritize scikit-learn
+PYSPARK_AVAILABLE = False  # Set to True to enable PySpark, False for sklearn-only
+
+# Conditional PySpark imports
+if PYSPARK_AVAILABLE:
+    try:
+        from pyspark.sql import DataFrame as SparkDataFrame, SparkSession
+        from pyspark.ml import Pipeline, PipelineModel
+        from pyspark.ml.feature import VectorAssembler
+    except ImportError:
+        PYSPARK_AVAILABLE = False
+        SparkDataFrame = None
+        SparkSession = None
+else:
+    SparkDataFrame = None
+    SparkSession = None
 
 # Configure logging
 logging.basicConfig(
@@ -91,9 +103,9 @@ class SparkModelTrainer:
     def train(
             self,
             model,
-            train_data: DataFrame,
+            train_data: Union[pd.DataFrame, object],
             feature_columns: list
-            ) -> Tuple[PipelineModel, dict]:
+            ) -> Tuple[object, dict]:
         """
         Train a PySpark MLlib model.
         
@@ -137,7 +149,7 @@ class SparkModelTrainer:
         
         return trained_pipeline, metrics
     
-    def save_model(self, model: PipelineModel, filepath: str) -> None:
+    def save_model(self, model: object, filepath: str) -> None:
         """Save a trained PySpark model using MLflow model registry."""
         if model is None:
             raise ValueError("Cannot save None model")
@@ -164,14 +176,11 @@ class SparkModelTrainer:
             logger.info(f"✓ PySpark model saved to MLflow registry: {model_name}")
             
             # Also save model metadata to our organized S3 structure
-            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-            if project_root not in sys.path:
-                sys.path.insert(0, project_root)
-            src_path = os.path.join(project_root, 'src')
-            if src_path not in sys.path:
-                sys.path.insert(0, src_path)
-            from utils.config import get_s3_bucket
-            from utils.s3_io import put_bytes
+            import sys
+            import os
+            sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
+            from config import get_s3_bucket
+            from s3_io import put_bytes
             import json
             
             model_metadata = {
@@ -184,7 +193,7 @@ class SparkModelTrainer:
             
             # Save metadata to our organized structure
             bucket = get_s3_bucket()
-            metadata_key = f"artifacts/model_artifacts/{timestamp}/model_metadata.json"
+            metadata_key = f"artifacts/train_artifacts/{timestamp}/model_metadata.json"
             metadata_json = json.dumps(model_metadata, indent=2).encode('utf-8')
             put_bytes(metadata_json, key=metadata_key, content_type='application/json')
             
@@ -192,7 +201,7 @@ class SparkModelTrainer:
             
             # Also save the actual Spark model to S3 model artifacts directory for direct loading
             try:
-                spark_model_s3a_path = f"s3a://{bucket}/artifacts/model_artifacts/{timestamp}/spark_model"
+                spark_model_s3a_path = f"s3a://{bucket}/artifacts/train_artifacts/{timestamp}/spark_model"
                 logger.info(f"💾 Saving Spark model to S3 model artifacts: {spark_model_s3a_path}")
                 
                 # Save the PipelineModel directly to S3A
@@ -209,7 +218,7 @@ class SparkModelTrainer:
             logger.error("💡 Ensure MLflow server is running and accessible")
             raise e
 
-    def load_model(self, filepath: str) -> PipelineModel:
+    def load_model(self, filepath: str) -> object:
         """Load a trained PySpark model from disk."""
         if not os.path.exists(filepath):
             raise FileNotFoundError(f"Model directory not found: {filepath}")
@@ -262,18 +271,15 @@ class SparkModelTrainer:
         
         # Save sklearn model to S3
         try:
-            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-            if project_root not in sys.path:
-                sys.path.insert(0, project_root)
-            src_path = os.path.join(project_root, 'src')
-            if src_path not in sys.path:
-                sys.path.insert(0, src_path)
-            from utils.s3_io import write_pickle
-
-            sklearn_model_key = f"artifacts/model_artifacts/{timestamp}/sklearn_model.pkl"
+            import sys
+            import os
+            sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
+            from s3_io import write_pickle
+            
+            sklearn_model_key = f"artifacts/train_artifacts/{timestamp}/sklearn_model.pkl"
             write_pickle(sklearn_model, key=sklearn_model_key)
             logger.info(f"✅ Sklearn model saved to S3: {sklearn_model_key}")
-
+            
         except Exception as sklearn_save_error:
             logger.warning(f"⚠️ Failed to save sklearn model to S3: {sklearn_save_error}")
             
