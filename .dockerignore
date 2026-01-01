@@ -17,14 +17,30 @@ htmlcov/
 
 # Data and Artifacts
 data/
+!data/raw/
+!data/raw/**
 artifacts/
 mlruns/
 logs/
 notebooks/
 *.csv
+!data/raw/*.csv
 *.parquet
 *.pkl
 *.joblib
+
+# Cursor and IDE
+cursor chat history/
+.cursor/
+*.md
+!README.md
+
+# Allow specific artifacts required for ECS consumer fallback
+!artifacts/models/
+!artifacts/models/best_model.pkl
+!artifacts/data/
+!artifacts/data/encoders.pkl
+!artifacts/data/scaler.pkl
 
 # OS
 .DS_Store

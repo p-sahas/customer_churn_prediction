@@ -37,8 +37,7 @@ env/
 env.bak/
 venv.bak/
 pyvenv.cfg
-.airflow/
-.airflow
+
 # ==========================================
 # Jupyter Notebook
 # ==========================================
@@ -76,8 +75,7 @@ pyvenv.cfg
 credentials.json
 secrets.yaml
 secrets.yml
-config.yaml
-config.yaml
+config.example.yaml
 
 # ==========================================
 # ML Artifacts & Data
@@ -205,7 +203,7 @@ CLEANUP_GUIDE.md
 # ==========================================
 # Redundant Config & Setup Files
 # ==========================================
-
+config.yaml.student-template
 env.example
 .env.example
 .env.all
@@ -337,14 +335,6 @@ pdm.lock
 # ==========================================
 .github/workflows/*_old.yml
 .github/workflows/*_backup.yml
-.github/workflows/ci.yml
-.github/workflows/docker-build.yml
-.github/workflows/cd-deploy.yml
-.github/workflows/ml-monitoring.yml
-.github/workflows/model-training.yml
-
-# Keep only the simplified CI
-!.github/workflows/ci-simplified.yml
 
 # ==========================================
 # Project-Specific Exclusions
@@ -371,7 +361,6 @@ DEPLOYMENT_ISOLATION.md
 !README.md
 !.gitignore
 !.gitkeep
-!.github/workflows/ci-simplified.yml
 !docs/README.md
 !docs/CI_CD_SIMPLIFIED_SUMMARY.md
 !docs/project_structure.md
@@ -379,8 +368,6 @@ DEPLOYMENT_ISOLATION.md
 !docs/KAFKA_QUICKSTART.md
 !docs/STUDENT_SETUP.md
 !tests/README_SIMPLIFIED.md
-!changelog.md
-!stepplan.md
 !config.yaml
 !requirements.txt
 !requirements-mlflow.txt
@@ -413,99 +400,5 @@ yarn-error.log*
 *.parquet
 *.feather
 
-
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
-
-# Virtual environments
-.env
-.venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
-
-# Local configuration
-.env
-.env.local
-.env.*.local
-config.local.yaml
-.env.out
-env.out
-
-# IDEs
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-.project
-.settings/
-
-# Artifacts and Data
-artifacts/
-mlruns/
-data/processed/
-data/artifacts/
-logs/
-*.log
-
-# Database files
-*.db
-*.sqlite
-*.sqlite3
-mlflow.db
-
-# OS
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
-
-# Docker
-docker-compose.override.yml
-
-# Jupyter
-.ipynb_checkpoints/
-*.ipynb
-
-# Testing
-.coverage
-.pytest_cache/
-htmlcov/
-.tox/
-.nox/
-
-# Temporary files
-*.tmp
-*.temp
-tmp/
-temp/
-
-# Runtime
-runtime/pids/*.pid
-runtime/kafka-logs/*
+# ECS deployment credentials (use 00_env.sh.example instead)
+ecs-deployment/00_env.sh
