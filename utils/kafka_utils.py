@@ -24,7 +24,8 @@ class NativeKafkaConfig:
             config_path: Path to configuration file (currently not used, loads default config.yaml)
         """
         self.config = load_config()
-        self.bootstrap_servers = "localhost:9092"  # Native broker
+        # Read bootstrap servers from environment or default to localhost
+        self.bootstrap_servers = os.environ.get('KAFKA_BOOTSTRAP_SERVERS', 'localhost:9092')
         
     def get_producer_config(self) -> Dict[str, Any]:
         """Get producer configuration for native Kafka"""
@@ -64,11 +65,11 @@ class NativeKafkaValidator:
             Dict with installation status
         """
         result = {
-                'kafka_home_set': False,
-                'kafka_binaries_found': False,
-                'java_available': False,
-                'error_messages': []
-                }
+            'kafka_home_set': False,
+            'kafka_binaries_found': False,
+            'java_available': False,
+            'error_messages': []
+        }
         
         try:
             # Check KAFKA_HOME environment variable
@@ -79,11 +80,11 @@ class NativeKafkaValidator:
             else:
                 # Try to detect Kafka installation automatically
                 common_kafka_paths = [
-                                    '/opt/homebrew/opt/kafka/libexec',  # Homebrew on Apple Silicon
-                                    '/usr/local/opt/kafka/libexec',    # Homebrew on Intel
-                                    '/opt/kafka',                       # Common Linux path
-                                    '/usr/local/kafka',                 # Alternative Linux path
-                                    ]
+                    '/opt/homebrew/opt/kafka/libexec',  # Homebrew on Apple Silicon
+                    '/usr/local/opt/kafka/libexec',    # Homebrew on Intel
+                    '/opt/kafka',                       # Common Linux path
+                    '/usr/local/kafka',                 # Alternative Linux path
+                ]
                 
                 for path in common_kafka_paths:
                     if os.path.exists(os.path.join(path, 'bin', 'kafka-topics.sh')):
@@ -127,7 +128,7 @@ class NativeKafkaValidator:
         return result
     
     @staticmethod
-    def check_kafka_connection(bootstrap_servers: str = "localhost:9092") -> bool:
+    def check_kafka_connection(bootstrap_servers: str = None) -> bool:
         """
         Check if native Kafka broker is running and accessible
         
@@ -137,6 +138,8 @@ class NativeKafkaValidator:
         Returns:
             True if connection successful, False otherwise
         """
+        if bootstrap_servers is None:
+            bootstrap_servers = os.environ.get('KAFKA_BOOTSTRAP_SERVERS', 'localhost:9092')
         try:
             admin_client = AdminClient({'bootstrap.servers': bootstrap_servers})
             metadata = admin_client.list_topics(timeout=5)
@@ -162,7 +165,8 @@ def create_topic(topic_name: str, partitions: int = 1, replication_factor: int =
     """
     try:
         # Teaching Note: Using confluent-kafka admin client for native broker operations
-        admin_client = AdminClient({'bootstrap.servers': 'localhost:9092'})
+        bootstrap_servers = os.environ.get('KAFKA_BOOTSTRAP_SERVERS', 'localhost:9092')
+        admin_client = AdminClient({'bootstrap.servers': bootstrap_servers})
         
         # Create topic
         topic_list = [NewTopic(
@@ -201,7 +205,8 @@ def list_topics() -> List[str]:
         List of topic names
     """
     try:
-        admin_client = AdminClient({'bootstrap.servers': 'localhost:9092'})
+        bootstrap_servers = os.environ.get('KAFKA_BOOTSTRAP_SERVERS', 'localhost:9092')
+        admin_client = AdminClient({'bootstrap.servers': bootstrap_servers})
         metadata = admin_client.list_topics(timeout=10)
         topics = list(metadata.topics.keys())
         logger.info(f"Found {len(topics)} topics on native broker: {topics}")
@@ -583,7 +588,7 @@ def get_topic_info(topic: str) -> Dict[str, Any]:
         Dict with topic information
     """
     try:
-        admin_client = AdminClient({'bootstrap.servers': 'localhost:9092'})
+        admin_client = AdminClient({'bootstrap.servers': os.environ.get('KAFKA_BOOTSTRAP_SERVERS', 'localhost:9092')})
         metadata = admin_client.list_topics(timeout=10)
         
         if topic in metadata.topics:
@@ -623,7 +628,7 @@ def monitor_consumer_lag(group_id: str, topic: str) -> Dict[str, Any]:
         # Use kafka-consumer-groups.sh command for lag monitoring
         cmd = [
             'kafka-consumer-groups.sh',
-            '--bootstrap-server', 'localhost:9092',
+            '--bootstrap-server', os.environ.get('KAFKA_BOOTSTRAP_SERVERS', 'localhost:9092'),
             '--group', group_id,
             '--describe'
         ]
@@ -686,7 +691,7 @@ def reset_consumer_offsets(group_id: str, topic: str, to_earliest: bool = True) 
         
         cmd = [
             'kafka-consumer-groups.sh',
-            '--bootstrap-server', 'localhost:9092',
+            '--bootstrap-server', os.environ.get('KAFKA_BOOTSTRAP_SERVERS', 'localhost:9092'),
             '--group', group_id,
             '--topic', topic,
             '--reset-offsets',
@@ -718,7 +723,7 @@ def list_topics() -> list:
     try:
         cmd = [
             'kafka-topics.sh',
-            '--bootstrap-server', 'localhost:9092',
+            '--bootstrap-server', os.environ.get('KAFKA_BOOTSTRAP_SERVERS', 'localhost:9092'),
             '--list'
         ]
         
@@ -750,7 +755,7 @@ def get_topic_message_count(topic: str) -> int:
         # Simple approach: try to consume with timeout to check if messages exist
         cmd = [
             'kafka-console-consumer.sh',
-            '--bootstrap-server', 'localhost:9092',
+            '--bootstrap-server', os.environ.get('KAFKA_BOOTSTRAP_SERVERS', 'localhost:9092'),
             '--topic', topic,
             '--from-beginning',
             '--max-messages', '1000',  # Limit to avoid hanging
@@ -789,7 +794,7 @@ def get_topic_info(topic: str) -> dict:
     try:
         cmd = [
             'kafka-topics.sh',
-            '--bootstrap-server', 'localhost:9092',
+            '--bootstrap-server', os.environ.get('KAFKA_BOOTSTRAP_SERVERS', 'localhost:9092'),
             '--describe',
             '--topic', topic
         ]
