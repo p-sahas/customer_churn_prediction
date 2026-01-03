@@ -126,4 +126,45 @@ Manage scheduled workflows using Apache Airflow.
   make automation-up
   ```
 
+### Data Management & S3
 
+Manage data and artifacts stored in AWS S3.
+
+* **Upload Data**: Upload local `data/raw` and `data/processed` folders to S3 (one-time setup).
+  ```bash
+  make s3-upload-data
+  ```
+* **List Files**: List files in the S3 bucket with a specific prefix.
+  ```bash
+  make s3-list PREFIX=artifacts/
+  ```
+* **Clean S3 Artifacts**: Remove project artifacts (models, data) from S3.
+  ```bash
+  make s3-clean
+  ```
+
+## Project Structure
+
+* `airflow/`: Contains Airflow DAG definitions and configuration settings.
+* `artifacts/`: Directory for local storage of artifacts (if S3 is not configured).
+* `data/`: Stores raw and processed datasets.
+* `docker/`: Dockerfiles and related scripts for building container images.
+* `pipelines/`: Core scripts for the machine learning pipelines (data processing, training, inference).
+* `scripts/`: various utility scripts for AWS interaction, deployment, and setup.
+* `src/`: Shared source code and python modules used across pipelines.
+* `tests/`: Unit and integration tests to ensure code reliability.
+* `.env`: Environment variables file (ensure this is not committed to version control).
+* `Makefile`: Defines shortcuts for build, run, and utility commands.
+* `docker-compose.yml`: Defines the services, networks, and volumes for the Docker setup.
+* `requirements.txt`: List of Python dependencies required for the project.
+* `setup.py`: Configuration for installing the project as a Python package.
+
+## License
+
+This project is licensed under the **MIT License**. See the [LICENSE](LICENSE) file for details.
+
+Credits
+
+**Zuu Crew - ML Engineering Team**
+
+Developed as part of the "Build Production-Ready Machine Learning Systems" course.
