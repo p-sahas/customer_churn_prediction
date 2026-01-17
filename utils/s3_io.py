@@ -130,6 +130,9 @@ def put_bytes(data: bytes, *, key: str, content_type: Optional[str] = None) -> N
             'ServerSideEncryption': 'aws:kms',
             'SSEKMSKeyId': kms_key
         })
+        logger.debug(f"🔐 Using KMS encryption with key: {kms_key[:20]}...")
+    else:
+        logger.debug("📦 Using default S3 encryption (no KMS key provided)")
     
     try:
         s3_client.put_object(**put_kwargs)
@@ -184,6 +187,9 @@ def upload_file(local_path, *, key: str) -> None:
             'ServerSideEncryption': 'aws:kms',
             'SSEKMSKeyId': kms_key
         })
+        logger.debug(f"🔐 Using KMS encryption with key: {kms_key[:20]}...")
+    else:
+        logger.debug("📦 Using default S3 encryption (no KMS key provided)")
     
     try:
         s3_client.upload_file(
@@ -256,6 +262,55 @@ def read_df_csv(*, key: str) -> pd.DataFrame:
     return df
 
 
+def write_df_parquet(df: pd.DataFrame, *, key: str, compression: str = "snappy") -> None:
+    """
+    Write pandas DataFrame to S3 as Parquet using pyarrow
+    
+    Args:
+        df: DataFrame to write
+        key: S3 key (path)
+        compression: Parquet compression codec (default: snappy)
+    """
+    try:
+        import pyarrow as pa  # noqa: F401
+        import pyarrow.parquet as pq  # noqa: F401
+    except Exception as e:
+        logger.error(f"❌ pyarrow required for Parquet operations: {e}")
+        raise
+    
+    buffer = io.BytesIO()
+    df.to_parquet(buffer, index=False, engine="pyarrow", compression=compression)
+    parquet_bytes = buffer.getvalue()
+    
+    put_bytes(parquet_bytes, key=key, content_type='application/octet-stream')
+    logger.info(f"✅ Wrote DataFrame ({df.shape}) as Parquet to s3://{get_s3_bucket()}/{key}")
+
+
+def read_df_parquet(*, key: str) -> pd.DataFrame:
+    """
+    Read pandas DataFrame from S3 Parquet
+    
+    Args:
+        key: S3 key (path)
+        
+    Returns:
+        pandas DataFrame
+    """
+    try:
+        import pyarrow as pa  # noqa: F401
+        import pyarrow.parquet as pq  # noqa: F401
+    except Exception as e:
+        logger.error(f"❌ pyarrow required for Parquet operations: {e}")
+        raise
+    
+    parquet_bytes = get_bytes(key)
+    buffer = io.BytesIO(parquet_bytes)
+    df = pd.read_parquet(buffer, engine="pyarrow")
+    
+    logger.info(f"✅ Read DataFrame ({df.shape}) from Parquet s3://{get_s3_bucket()}/{key}")
+    return df
+
+
 def write_df_json(df: pd.DataFrame, *, key: str) -> None:
     """
     Write pandas DataFrame to S3 as JSON
@@ -286,38 +341,65 @@ def read_df_json(*, key: str) -> pd.DataFrame:
     return df
 
 
-def write_pickle(obj: Any, *, key: str) -> None:
+def write_pickle(obj: Any, *, key: str, use_joblib: bool = True) -> None:
     """
-    Write Python object to S3 using pickle
+    Write Python object to S3 using joblib (preferred for sklearn) or pickle
     
     Args:
         obj: Object to serialize
         key: S3 key (path)
+        use_joblib: Use joblib instead of pickle (recommended for sklearn models)
     """
     buffer = io.BytesIO()
-    pickle.dump(obj, buffer)
+    
+    if use_joblib:
+        # Use joblib for sklearn models (more efficient, handles numpy arrays better)
+        import joblib
+        joblib.dump(obj, buffer, compress=3)  # compress=3 for good balance
+        serializer = "joblib"
+    else:
+        # Fallback to pickle for other objects
+        pickle.dump(obj, buffer)
+        serializer = "pickle"
+    
     pickle_data = buffer.getvalue()
     
     put_bytes(pickle_data, key=key, content_type='application/octet-stream')
-    logger.info(f"✅ Wrote pickled object ({len(pickle_data)} bytes) to s3://{get_s3_bucket()}/{key}")
+    logger.info(f"✅ Wrote {serializer} object ({len(pickle_data)} bytes) to s3://{get_s3_bucket()}/{key}")
 
 
-def read_pickle(*, key: str) -> Any:
+def read_pickle(*, key: str, use_joblib: bool = True) -> Any:
     """
-    Read Python object from S3 pickle
+    Read Python object from S3 using joblib (preferred) or pickle
     
     Args:
         key: S3 key (path)
+        use_joblib: Try joblib first, fallback to pickle if it fails
         
     Returns:
-        Unpickled object
+        Deserialized object
     """
     pickle_data = get_bytes(key)
     buffer = io.BytesIO(pickle_data)
-    obj = pickle.load(buffer)
     
-    logger.info(f"✅ Read pickled object ({len(pickle_data)} bytes) from s3://{get_s3_bucket()}/{key}")
-    return obj
+    if use_joblib:
+        try:
+            # Try joblib first (for sklearn models)
+            import joblib
+            obj = joblib.load(buffer)
+            logger.info(f"✅ Read joblib object ({len(pickle_data)} bytes) from s3://{get_s3_bucket()}/{key}")
+            return obj
+        except Exception as e:
+            # Fallback to pickle if joblib fails
+            logger.debug(f"Joblib load failed, trying pickle: {e}")
+            buffer.seek(0)  # Reset buffer position
+            obj = pickle.load(buffer)
+            logger.info(f"✅ Read pickle object ({len(pickle_data)} bytes) from s3://{get_s3_bucket()}/{key}")
+            return obj
+    else:
+        obj = pickle.load(buffer)
+        logger.info(f"✅ Read pickle object ({len(pickle_data)} bytes) from s3://{get_s3_bucket()}/{key}")
+        return obj
 
 
 def list_keys(prefix: str = "") -> List[str]:

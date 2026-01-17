@@ -1,6 +1,7 @@
 import os
 import yaml
 import logging
+import re
 from typing import Dict, Any, List, Optional
 from dotenv import load_dotenv
 
@@ -13,10 +14,31 @@ CONFIG_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)),
     'config.yaml')
 
 
+def _substitute_env_vars(config: Any) -> Any:
+    """
+    Recursively substitute environment variables in config.
+    Supports ${VAR_NAME} syntax.
+    """
+    if isinstance(config, dict):
+        return {key: _substitute_env_vars(value) for key, value in config.items()}
+    elif isinstance(config, list):
+        return [_substitute_env_vars(item) for item in config]
+    elif isinstance(config, str):
+        # Find all ${VAR_NAME} patterns
+        def replacer(match):
+            var_name = match.group(1)
+            return os.environ.get(var_name, match.group(0))
+        return re.sub(r'\$\{([A-Za-z_][A-Za-z0-9_]*)\}', replacer, config)
+    else:
+        return config
+
+
 def load_config():
     try:
         with open(CONFIG_FILE, 'r') as f:
             config = yaml.safe_load(f)
+        # Substitute environment variables
+        config = _substitute_env_vars(config)
         return config
     except Exception as e:
         logger.error(f'Error loading configuration: {e}')
@@ -115,6 +137,51 @@ def get_data_config() ->Dict[str, Any]:
     return config.get('data', {})
 
 
+def get_raw_data_path() -> str:
+    """
+    Get the raw data path based on config selection.
+    
+    Returns:
+        Full S3 path to the raw data file
+    """
+    config = load_config()
+    data_config = config.get('data', {})
+    
+    # Get configurable file name (default to original)
+    raw_data_file = data_config.get('raw_data_file', 'ChurnModelling.csv')
+    s3_bucket = data_config.get('s3_bucket') or os.getenv('S3_BUCKET')
+    if not s3_bucket:
+        raise ValueError("S3_BUCKET must be set in .env file or config.yaml")
+    s3_prefix = data_config.get('s3_prefix', 'data/raw')
+    
+    # Construct full S3 path
+    s3_path = f"s3://{s3_bucket}/{s3_prefix}/{raw_data_file}"
+    
+    logger.info(f"Using raw data file: {raw_data_file}")
+    logger.info(f"Full S3 path: {s3_path}")
+    
+    return s3_path
+
+
+def get_local_raw_data_path() -> str:
+    """
+    Get the local raw data path based on config selection.
+    
+    Returns:
+        Local file path to the raw data file
+    """
+    config = load_config()
+    data_config = config.get('data', {})
+    
+    # Get configurable file name (default to original)
+    raw_data_file = data_config.get('raw_data_file', 'ChurnModelling.csv')
+    
+    # Construct local path
+    local_path = f"data/raw/{raw_data_file}"
+    
+    return local_path
+
+
 def get_preprocessing_config() ->Dict[str, Any]:
     config = get_config()
     return config.get('preprocessing', {})
@@ -174,38 +241,19 @@ def get_aws_config() -> Dict[str, Any]:
     aws_config = config.get('aws', {})
     
     # Fallback to environment variables if not in config.yaml
-    region = aws_config.get('region', os.getenv('AWS_REGION', 'ap-south-1'))
-    bucket = aws_config.get('s3_bucket', os.getenv('S3_BUCKET'))
-    kms = aws_config.get('s3_kms_key_arn', os.getenv('S3_KMS_KEY_ARN'))
-    # Default to False for local development so we can fall back to local artifacts when S3/KMS access fails
-    force_s3 = aws_config.get('force_s3_io', os.getenv('FORCE_S3_IO', 'false').lower() in ('true', '1', 'yes'))
-
-    # Sanitize strings (strip whitespace, stray CR characters, and surrounding quotes)
-    def _sanitize(s: str) -> str:
-        return s.strip().strip('\r').strip().strip('\"\'') if isinstance(s, str) else s
-
-    if isinstance(region, str):
-        region = _sanitize(region)
-    if isinstance(bucket, str) and bucket:
-        bucket = _sanitize(bucket)
-    if isinstance(kms, str) and kms:
-        kms = _sanitize(kms)
-
+    # USE_S3 defaults to FALSE (local mode) for easier debugging
     return {
-        'region': region,
-        'bucket': bucket,
-        'kms_key_arn': kms,
-        'force_s3_io': force_s3
+        'region': aws_config.get('region', os.getenv('AWS_REGION', 'ap-south-1')),
+        'bucket': aws_config.get('s3_bucket', os.getenv('S3_BUCKET')),
+        'kms_key_arn': aws_config.get('s3_kms_key_arn', os.getenv('S3_KMS_KEY_ARN')),
+        'force_s3_io': aws_config.get('use_s3', os.getenv('USE_S3', 'false').lower() in ('true', '1', 'yes'))
     }
 
 
 def get_aws_region() -> str:
-    """Get AWS region from config.yaml or environment variables (sanitized)."""
+    """Get AWS region from config.yaml or environment variables"""
     aws_config = get_aws_config()
-    region = aws_config.get('region', 'ap-south-1')
-    if isinstance(region, str):
-        return region.strip().strip('\r').strip().strip('\'"')
-    return region
+    return aws_config['region']
 
 
 def get_s3_bucket() -> str:
@@ -221,30 +269,64 @@ def get_s3_bucket() -> str:
 
 
 def get_s3_kms_arn() -> Optional[str]:
-    """Get S3 KMS key ARN from config.yaml or environment variables"""
+    """Get S3 KMS key ARN from config.yaml or environment variables (returns None if not set or is a placeholder)"""
     aws_config = get_aws_config()
-    kms = aws_config['kms_key_arn']
-    if isinstance(kms, str) and kms:
-        return kms.strip().strip('\r').strip().strip('\'"')
-    return kms
+    kms_arn = aws_config.get('kms_key_arn')
+    
+    # Return None if KMS ARN is not set, empty, or is a placeholder
+    if not kms_arn or kms_arn.startswith('${') or kms_arn == 'None':
+        return None
+    
+    return kms_arn
 
 
-def force_s3_io() -> bool:
-    """Check if S3-only I/O is enforced from config.yaml or environment variables"""
+def use_s3() -> bool:
+    """
+    Check if S3 should be used for I/O operations.
+    Priority:
+    1. USE_S3 environment variable (true/false)
+    2. FORCE_S3_IO environment variable (true/false)
+    3. config.yaml aws.force_s3_io setting
+    
+    Returns False to use local artifacts directory instead of S3.
+    """
+    # Check USE_S3 environment variable first (master toggle)
+    use_s3_env = os.getenv('USE_S3', '').lower()
+    if use_s3_env in ('false', '0', 'no', 'off'):
+        return False
+    elif use_s3_env in ('true', '1', 'yes', 'on'):
+        return True
+    
+    # Fall back to FORCE_S3_IO or config
     aws_config = get_aws_config()
     return aws_config['force_s3_io']
 
 
+def force_s3_io() -> bool:
+    """Alias for use_s3() for backward compatibility"""
+    return use_s3()
+
+
 def get_mlflow_config() -> Dict[str, Any]:
-    """Get MLflow configuration from config.yaml"""
+    """Get MLflow configuration with sensible defaults and S3 artifact root."""
     config = load_config()
     mlflow_config = config.get('mlflow', {})
     
-    # Environment variables take priority over config.yaml
+    tracking_uri = os.getenv('MLFLOW_TRACKING_URI') or mlflow_config.get('tracking_uri', 'http://localhost:5001')
+    artifact_root = os.getenv('MLFLOW_DEFAULT_ARTIFACT_ROOT') or mlflow_config.get('artifact_root')
+    experiment_name = mlflow_config.get('experiment_name', 'Zuu Crew Churn Analysis')
+    
+    # Default artifact_root to S3 if not explicitly set
+    if not artifact_root:
+        s3_bucket = os.getenv('S3_BUCKET') or config.get('aws', {}).get('s3_bucket')
+        if s3_bucket:
+            artifact_root = f"s3://{s3_bucket}/mlflow-artifacts"
+            logger.info(f"Defaulting MLflow artifact root to: {artifact_root}")
+    
     return {
-        'tracking_uri': os.getenv('MLFLOW_TRACKING_URI') or mlflow_config.get('tracking_uri', 'http://localhost:5001'),
-        'artifact_root': os.getenv('MLFLOW_DEFAULT_ARTIFACT_ROOT') or mlflow_config.get('artifact_root'),
-        'experiment_name': mlflow_config.get('experiment_name', 'Zuu Crew Churn Analysis')
+        'tracking_uri': tracking_uri,
+        'artifact_root': artifact_root,
+        'experiment_name': experiment_name
     }
 
 
@@ -254,26 +336,57 @@ def get_s3_config() -> Dict[str, Any]:
     return config.get('aws', {})
 
 def get_aws_region():
-    """Get AWS region from environment variables or config (sanitized)."""
+    """Get AWS region from environment variables or config"""
     # Try environment variables first
     region = os.environ.get('AWS_REGION') or os.environ.get('AWS_DEFAULT_REGION')
     if region:
-        return region.strip().strip('\r').strip().strip('\'"')
+        return region
     
     # Fallback to config file
     config = load_config()
-    region = config.get('aws', {}).get('region', 'ap-south-1')
-    if isinstance(region, str):
-        return region.strip().strip('\r').strip().strip('\'"')
-    return region
+    return config.get('aws', {}).get('region', 'ap-south-1')
 
 def get_s3_kms_arn():
-    """Get S3 KMS key ARN from config"""
+    """Get S3 KMS key ARN from config (returns None if not set or is a placeholder)"""
     config = load_config()
-    kms = config.get('aws', {}).get('s3_kms_key_arn')
-    if isinstance(kms, str) and kms:
-        return kms.strip().strip('\r').strip().strip('\'"')
-    return kms
+    kms_arn = config.get('aws', {}).get('s3_kms_key_arn')
+    
+    # Return None if KMS ARN is not set, empty, or is a placeholder
+    if not kms_arn or kms_arn.startswith('${') or kms_arn == 'None':
+        return None
+    
+    return kms_arn
+
+def get_mlflow_tracking_uri():
+    """Get MLflow tracking URI based on CONTAINERIZED environment variable"""
+    import os
+    
+    # PRIORITY 1: Check environment variable first (set by ECS task definition)
+    env_tracking_uri = os.environ.get('MLFLOW_TRACKING_URI')
+    if env_tracking_uri:
+        environment = 'ECS' if os.environ.get('CONTAINERIZED', 'false').lower() == 'true' else 'Local'
+        return env_tracking_uri, environment
+    
+    # PRIORITY 2: Fall back to config file
+    config = load_config()
+    mlflow_config = config.get('mlflow', {})
+    
+    # Check if running in containerized environment
+    containerized = os.environ.get('CONTAINERIZED', 'false').lower() == 'true'
+    
+    if containerized:
+        tracking_uri = mlflow_config.get('docker_tracking_uri', 'http://mlflow-tracking:5001')
+        environment = 'Docker'
+    else:
+        tracking_uri = mlflow_config.get('local_tracking_uri', 'http://localhost:5001')
+        environment = 'Local'
+    
+    return tracking_uri, environment
+
+def is_containerized():
+    """Check if running in containerized environment"""
+    import os
+    return os.environ.get('CONTAINERIZED', 'false').lower() == 'true'
 
 
 create_default_config()

@@ -8,7 +8,7 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 
-from utils.config import get_mlflow_config
+from config import get_mlflow_config
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -22,96 +22,112 @@ class MLflowTracker:
         self.setup_mlflow()
         
     def setup_mlflow(self):
-        """Initialize MLflow tracking with configuration.
-
-        If the configured HTTP tracking server is unreachable, fall back to a local
-        file-based tracking URI ('file:./mlruns'). If local initialization also
-        fails, disable MLflow operations for the current session so the pipeline
-        can continue without raising an exception.
-        """
-        tracking_uri = self.config.get('tracking_uri', 'file:./mlruns')
-        mlflow.set_tracking_uri(tracking_uri)
-
+        """Initialize MLflow tracking with dynamic URL based on CONTAINERIZED environment"""
+        from config import get_mlflow_tracking_uri, is_containerized
+        
+        # Get dynamic MLflow URL based on environment
+        tracking_uri, environment = get_mlflow_tracking_uri()
+        artifact_root = self.config.get('artifact_root')
+        
+        logger.info(f"🎯 Environment detected: {environment}")
+        logger.info(f"🔗 MLflow URL: {tracking_uri}")
+        logger.info(f"📦 Containerized: {is_containerized()}")
+        
+        # Try to connect to the configured tracking URI
+        try:
+            mlflow.set_tracking_uri(tracking_uri)
+            logger.info(f"MLflow tracking URI set to: {tracking_uri}")
+            
+            # Test connection by trying to get experiments
+            if tracking_uri.startswith('http'):
+                import requests
+                health_url = tracking_uri.replace('/api', '').rstrip('/') + '/health'
+                response = requests.get(health_url, timeout=5)
+                if response.status_code != 200:
+                    raise ConnectionError(f"MLflow server not responding: {health_url}")
+                logger.info(f"✅ MLflow server connection verified: {tracking_uri}")
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to connect to MLflow server at {tracking_uri}: {e}")
+            logger.info("🔄 Falling back to local file-based MLflow tracking...")
+            
+            # Fallback to local file-based tracking
+            fallback_uri = 'file:./mlruns'
+            mlflow.set_tracking_uri(fallback_uri)
+            logger.info(f"MLflow fallback URI set to: {fallback_uri}")
+            artifact_root = None  # Don't use S3 for local fallback
+        
+        # Set artifact root if configured for S3 and connection successful
+        if artifact_root:
+            import os
+            os.environ['MLFLOW_DEFAULT_ARTIFACT_ROOT'] = artifact_root
+            logger.info(f"MLflow artifact root set to: {artifact_root}")
+        
         experiment_name = self.config.get('experiment_name', 'churn_prediction_experiment')
-
-        # Flag to indicate whether MLflow is available for logging
-        self.mlflow_disabled = False
-
+        
         try:
             experiment = mlflow.get_experiment_by_name(experiment_name)
             if experiment is None:
-                experiment_id = mlflow.create_experiment(experiment_name)
-                logger.info(f"Created new MLflow experiment: {experiment_name} (ID: {experiment_id})")
+                # Create experiment with S3 artifact location if configured
+                if artifact_root:
+                    experiment_id = mlflow.create_experiment(
+                        name=experiment_name,
+                        artifact_location=artifact_root
+                    )
+                    logger.info(f"Created new MLflow experiment with S3 backend: {experiment_name} (ID: {experiment_id})")
+                    logger.info(f"Artifact location: {artifact_root}")
+                else:
+                    experiment_id = mlflow.create_experiment(experiment_name)
+                    logger.info(f"Created new MLflow experiment: {experiment_name} (ID: {experiment_id})")
             else:
                 experiment_id = experiment.experiment_id
                 logger.info(f"Using existing MLflow experiment: {experiment_name} (ID: {experiment_id})")
-
+                
             mlflow.set_experiment(experiment_name)
-
-        except Exception as e:
-            logger.warning(
-                f"MLflow tracking at '{tracking_uri}' unavailable: {e}. "
-                "Attempting to fall back to local file-based tracking './mlruns'."
-            )
-
-            # Try fallback to local file-based mlruns
-            try:
-                local_tracking_uri = 'file:./mlruns'
-                mlflow.set_tracking_uri(local_tracking_uri)
-                experiment = mlflow.get_experiment_by_name(experiment_name)
-                if experiment is None:
-                    experiment_id = mlflow.create_experiment(experiment_name)
-                    logger.info(f"Created new local MLflow experiment: {experiment_name} (ID: {experiment_id})")
-                else:
-                    experiment_id = experiment.experiment_id
-                    logger.info(f"Using existing local MLflow experiment: {experiment_name} (ID: {experiment_id})")
-
-                mlflow.set_experiment(experiment_name)
-                logger.info(f"Fell back to local MLflow tracking: {local_tracking_uri}")
-
-            except Exception as e2:
-                logger.error(f"Failed to initialize local MLflow tracking: {e2}. Disabling MLflow logging.")
-                # Don't raise - pipeline should continue even if MLflow is unavailable
-                self.mlflow_disabled = True
-    
-    def start_run(self, run_name: Optional[str] = None, tags: Optional[Dict[str, str]] = None) -> mlflow.ActiveRun:
-        """Start a new MLflow run"""
-        # Format timestamp for run name
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
-        if run_name is None:
-            run_name_prefix = self.config.get('run_name_prefix', 'run')
-            # Remove underscores and format with timestamp
-            run_name_prefix = run_name_prefix.replace('_', ' ')
-            run_name = f"{run_name_prefix} | {timestamp}"
-        else:
-            # Remove underscores from provided run name and append timestamp
-            run_name = run_name.replace('_', ' ')
-            run_name = f"{run_name} | {timestamp}"
-        
-        # If MLflow was disabled during setup, skip starting a run
-        if getattr(self, 'mlflow_disabled', False):
-            logger.warning("MLflow is disabled; skipping start_run and continuing without MLflow.")
-            return None
-
-        # Merge default tags with provided tags
-        default_tags = self.config.get('tags', {})
-        if tags:
-            default_tags.update(tags)
             
-        run = mlflow.start_run(run_name=run_name, tags=default_tags)
-        logger.info(f"Started MLflow run: {run_name} (ID: {run.info.run_id})")
-        print(f"🎯 MLflow Run Name: {run_name}")
-        return run
+        except Exception as e:
+            logger.error(f"Error setting up MLflow experiment: {e}")
+            # Don't raise - continue without MLflow tracking
+            logger.warning("⚠️ Continuing without MLflow experiment tracking")
+    
+    def start_run(self, run_name: Optional[str] = None, tags: Optional[Dict[str, str]] = None) -> Optional[mlflow.ActiveRun]:
+        """Start a new MLflow run with error handling"""
+        try:
+            # Format timestamp for run name
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
+            if run_name is None:
+                run_name_prefix = self.config.get('run_name_prefix', 'run')
+                # Remove underscores and format with timestamp
+                run_name_prefix = run_name_prefix.replace('_', ' ')
+                run_name = f"{run_name_prefix} | {timestamp}"
+            else:
+                # Remove underscores from provided run name and append timestamp
+                run_name = run_name.replace('_', ' ')
+                run_name = f"{run_name} | {timestamp}"
+            
+            # Merge default tags with provided tags
+            default_tags = self.config.get('tags', {})
+            if tags:
+                default_tags.update(tags)
+                
+            run = mlflow.start_run(run_name=run_name, tags=default_tags)
+            logger.info(f"Started MLflow run: {run_name} (ID: {run.info.run_id})")
+            print(f"🎯 MLflow Run Name: {run_name}")
+            return run
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to start MLflow run: {e}")
+            logger.info("Continuing without MLflow run tracking...")
+            return None
     
     def log_data_pipeline_metrics(self, dataset_info: Dict[str, Any]):
         """Log data pipeline metrics and artifacts"""
-        # If MLflow is disabled, skip logging and return
-        if getattr(self, 'mlflow_disabled', False):
-            logger.warning("MLflow is disabled; skipping data pipeline metric logging.")
-            return
-
         try:
+            # Check if MLflow run is active
+            if not mlflow.active_run():
+                logger.debug("No active MLflow run, skipping data pipeline metrics logging")
+                return
+                
             # Log dataset metrics
             mlflow.log_metrics({
                 'dataset_rows': dataset_info.get('total_rows', 0),
@@ -139,15 +155,11 @@ class MLflowTracker:
             logger.info("Logged data pipeline metrics to MLflow")
             
         except Exception as e:
-            logger.error(f"Error logging data pipeline metrics: {e}")
+            logger.warning(f"⚠️ Failed to log data pipeline metrics to MLflow: {e}")
+            logger.debug("Continuing without MLflow data pipeline logging...")
     
     def log_training_metrics(self, model, training_metrics: Dict[str, Any], model_params: Dict[str, Any]):
         """Log training metrics, parameters, and model artifacts"""
-        # If MLflow disabled, skip logging
-        if getattr(self, 'mlflow_disabled', False):
-            logger.warning("MLflow is disabled; skipping training metric/model logging.")
-            return
-
         try:
             # Log model parameters
             mlflow.log_params(model_params)
@@ -170,10 +182,6 @@ class MLflowTracker:
     
     def log_evaluation_metrics(self, evaluation_metrics: Dict[str, Any], confusion_matrix_path: Optional[str] = None):
         """Log evaluation metrics and artifacts"""
-        if getattr(self, 'mlflow_disabled', False):
-            logger.warning("MLflow is disabled; skipping evaluation metric logging.")
-            return
-
         try:
             # Log evaluation metrics
             if 'metrics' in evaluation_metrics:
@@ -284,16 +292,14 @@ class MLflowTracker:
     
     def end_run(self):
         """End the current MLflow run"""
-        # If MLflow is disabled, no-op
-        if getattr(self, 'mlflow_disabled', False):
-            logger.warning("MLflow is disabled; nothing to end.")
-            return
-
         try:
-            mlflow.end_run()
-            logger.info("Ended MLflow run")
+            if mlflow.active_run():
+                mlflow.end_run()
+                logger.info("Ended MLflow run")
+            else:
+                logger.debug("No active MLflow run to end")
         except Exception as e:
-            logger.error(f"Error ending MLflow run: {e}")
+            logger.warning(f"⚠️ Failed to end MLflow run: {e}")
 
 
 def setup_mlflow_autolog():

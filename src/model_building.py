@@ -6,11 +6,23 @@ from abc import ABC, abstractmethod
 from sklearn.ensemble import RandomForestClassifier
 
 # PySpark MLlib imports
-from pyspark.ml.classification import RandomForestClassifier as SparkRandomForestClassifier
-from pyspark.ml.classification import GBTClassifier as SparkGBTClassifier
-from pyspark.ml.classification import LogisticRegression as SparkLogisticRegression
-from pyspark.ml.feature import VectorAssembler
-from pyspark.ml import Pipeline
+# Manual PySpark availability flag - set to False to prioritize scikit-learn
+PYSPARK_AVAILABLE = False  # Set to True to enable PySpark, False for sklearn-only
+
+# Conditional PySpark imports
+if PYSPARK_AVAILABLE:
+    try:
+        from pyspark.ml.classification import RandomForestClassifier as SparkRandomForestClassifier
+        from pyspark.ml.classification import GBTClassifier as SparkGBTClassifier
+        from pyspark.ml.classification import LogisticRegression as SparkLogisticRegression
+        from pyspark.ml.feature import VectorAssembler
+        from pyspark.ml import Pipeline
+    except ImportError:
+        PYSPARK_AVAILABLE = False
+else:
+    SparkRandomForestClassifier = None
+    SparkGBTClassifier = None
+    SparkLogisticRegression = None
 
 class BaseModelBuilder(ABC):
     def __init__(
@@ -69,10 +81,6 @@ class XGboostModelBuilder(BaseModelBuilder):
         return self.model
 
 
-# ========================================================================================
-# PYSPARK MLLIB MODEL BUILDERS - Simple versions matching original structure
-# ========================================================================================
-
 class SparkRandomForestModelBuilder(BaseModelBuilder):
     def __init__(self, **kwargs):
         default_params = {
@@ -128,7 +136,6 @@ class SparkGBTModelBuilder(BaseModelBuilder):
         
         from pyspark.ml.classification import GBTClassificationModel
         self.model = GBTClassificationModel.load(filepath)
-
 
 # rf = RandomForestModelBuilder()
 # rf_model = rf.build_model()

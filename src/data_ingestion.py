@@ -2,9 +2,24 @@ import os
 import logging
 from abc import ABC, abstractmethod
 from typing import Optional, Union
-import pandas as pd  # Keep pandas import for educational purposes
-from pyspark.sql import DataFrame, SparkSession
-from utils.spark_session import get_or_create_spark_session
+import pandas as pd
+import numpy as np
+
+# Manual PySpark availability flag - set to False to prioritize pandas
+PYSPARK_AVAILABLE = False  # Set to True to enable PySpark, False for pandas-only
+
+# Conditional PySpark imports
+if PYSPARK_AVAILABLE:
+    try:
+        from pyspark.sql import DataFrame as SparkDataFrame, SparkSession
+        from utils.spark_session import get_or_create_spark_session
+    except ImportError:
+        PYSPARK_AVAILABLE = False
+        SparkDataFrame = None
+        SparkSession = None
+else:
+    SparkDataFrame = None
+    SparkSession = None
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -14,16 +29,14 @@ class DataIngestor(ABC):
     """Abstract base class for data ingestion supporting both pandas and PySpark."""
     
     def __init__(self, spark: Optional[SparkSession] = None):
-        """
-        Initialize DataIngestor with a SparkSession.
-        
-        Args:
-            spark: Optional SparkSession. If not provided, will create/get one.
-        """
-        self.spark = spark or get_or_create_spark_session()
+        """Initialize with optional SparkSession."""
+        if PYSPARK_AVAILABLE and spark:
+            self.spark = spark
+        else:
+            self.spark = None
     
     @abstractmethod
-    def ingest(self, file_path_or_link: str) -> DataFrame:
+    def ingest(self, file_path_or_link: str) -> Union[pd.DataFrame, SparkDataFrame]:
         """
         Ingest data from the specified path.
         
@@ -31,15 +44,71 @@ class DataIngestor(ABC):
             file_path_or_link: Path to the data file
             
         Returns:
-            DataFrame (PySpark or pandas depending on implementation)
+            DataFrame (pandas by default, PySpark if PYSPARK_AVAILABLE=True)
         """
         pass
 
 
 class DataIngestorCSV(DataIngestor):
-    """CSV data ingestion implementation."""
+    """CSV data ingestion implementation supporting both pandas and PySpark."""
     
-    def ingest(self, file_path_or_link: str, **options) -> DataFrame:
+    def ingest(self, file_path_or_link: str, **options) -> Union[pd.DataFrame, SparkDataFrame]:
+        """Ingest CSV data using pandas (default) or PySpark based on availability."""
+        
+        # Use pandas by default (fast, simple)
+        if not PYSPARK_AVAILABLE or self.spark is None:
+            return self._ingest_pandas(file_path_or_link, **options)
+        else:
+            return self._ingest_pyspark(file_path_or_link, **options)
+    
+    def _ingest_pandas(self, file_path_or_link: str, **options) -> pd.DataFrame:
+        """Ingest CSV using pandas (fast, default)."""
+        import time
+        start_time = time.time()
+        
+        logger.info(f"\n{'='*60}")
+        logger.info(f"📥 DATA INGESTION - CSV (PANDAS)")
+        logger.info(f"{'='*60}")
+        logger.info(f"🐼 Engine: Pandas (fast, lightweight)")
+        logger.info(f"🔗 Source: {file_path_or_link}")
+        logger.info(f"⚙️ Options: {options if options else 'Default pandas options'}")
+        
+        try:
+            # Handle S3 paths by using s3_io utilities
+            if file_path_or_link.startswith('s3://'):
+                from utils.s3_io import read_df_csv
+                s3_key = file_path_or_link.replace('s3://', '').split('/', 1)[1]
+                df = read_df_csv(key=s3_key)
+                logger.info(f"✓ Loaded from S3 using pandas")
+            else:
+                # Local file with pandas
+                df = pd.read_csv(file_path_or_link, **options)
+                logger.info(f"✓ Loaded from local file using pandas")
+            
+            # Enhanced logging with detailed metrics
+            load_time = time.time() - start_time
+            memory_mb = df.memory_usage(deep=True).sum() / 1024**2
+            
+            logger.info(f"✅ CSV INGESTION COMPLETED")
+            logger.info(f"📊 Dataset metrics:")
+            logger.info(f"  • Shape: {df.shape[0]:,} rows × {df.shape[1]} columns")
+            logger.info(f"  • Memory usage: {memory_mb:.2f} MB")
+            logger.info(f"  • Load time: {load_time:.2f} seconds")
+            logger.info(f"  • Throughput: {df.shape[0]/load_time:,.0f} rows/second")
+            logger.info(f"🔍 Column overview:")
+            logger.info(f"  • Numeric: {len(df.select_dtypes(include=[np.number]).columns)} columns")
+            logger.info(f"  • Text/Object: {len(df.select_dtypes(include=['object']).columns)} columns")
+            logger.info(f"  • Sample columns: {list(df.columns[:5])}{'...' if len(df.columns) > 5 else ''}")
+            logger.info(f"{'='*60}\n")
+            
+            return df
+            
+        except Exception as e:
+            logger.error(f"✗ Failed to load CSV data from {file_path_or_link}: {str(e)}")
+            logger.info(f"{'='*60}\n")
+            raise
+    
+    def _ingest_pyspark(self, file_path_or_link: str, **options) -> SparkDataFrame:
         """
         Ingest CSV data using PySpark.
         
@@ -74,14 +143,10 @@ class DataIngestorCSV(DataIngestor):
                 logger.info(f"📁 Loading from S3A: {data_path}")
             else:
                 # Handle local path or S3 URL from config
-                project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-                if project_root not in sys.path:
-                    sys.path.insert(0, project_root)
-                src_path = os.path.join(project_root, 'src')
-                if src_path not in sys.path:
-                    sys.path.insert(0, src_path)
-                from utils.config import get_s3_bucket, force_s3_io
-                from utils.s3_io import key_exists
+                import sys
+                sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
+                from config import get_s3_bucket, force_s3_io
+                from s3_io import key_exists
                 
                 # Check if this is an S3 URL that needs conversion
                 if 's3://' in file_path_or_link:
@@ -135,8 +200,7 @@ class DataIngestorCSV(DataIngestor):
             }
             csv_options.update(options)
             
-            ############### PYSPARK CODES ###########################
-            # Read CSV file (from S3 or local)
+                    # Read CSV file (from S3 or local)
             df = self.spark.read.options(**csv_options).csv(data_path)
             
             # Get DataFrame info
@@ -153,11 +217,6 @@ class DataIngestorCSV(DataIngestor):
             else:
                 estimated_memory = 0
             
-            ############### PANDAS CODES ###########################
-            # logger.info(f"✓ Successfully loaded CSV data - Shape: {df.shape}, Columns: {list(df.columns)}")
-            # logger.info(f"✓ Memory usage: {df.memory_usage(deep=True).sum() / 1024**2:.2f} MB")
-            
-            ############### PYSPARK CODES ###########################
             logger.info(f"✓ Successfully loaded CSV data - Shape: ({row_count}, {len(columns)})")
             logger.info(f"✓ Columns: {columns}")
             logger.info(f"✓ Estimated memory usage: {estimated_memory:.2f} MB")
@@ -176,7 +235,7 @@ class DataIngestorCSV(DataIngestor):
 class DataIngestorExcel(DataIngestor):
     """Excel data ingestion implementation."""
     
-    def ingest(self, file_path_or_link: str, sheet_name: Optional[str] = None, **options) -> DataFrame:
+    def ingest(self, file_path_or_link: str, sheet_name: Optional[str] = None, **options) -> Union[pd.DataFrame, SparkDataFrame]:
         """
         Ingest Excel data using PySpark.
         Note: This implementation converts Excel to CSV format internally as PySpark
@@ -201,11 +260,6 @@ class DataIngestorExcel(DataIngestor):
             # In production, consider using spark-excel library
             logger.info("⚠ Note: Using pandas for Excel reading, then converting to PySpark")
             
-            ############### PANDAS CODES ###########################
-            # df = pd.read_excel(file_path_or_link)
-            
-            ############### PYSPARK CODES ###########################
-            # Read Excel with pandas first
             pandas_df = pd.read_excel(file_path_or_link, sheet_name=sheet_name)
             
             # Convert to PySpark DataFrame
@@ -215,11 +269,6 @@ class DataIngestorExcel(DataIngestor):
             row_count = df.count()
             columns = df.columns
             
-            ############### PANDAS CODES ###########################
-            # logger.info(f"✓ Successfully loaded Excel data - Shape: {df.shape}, Columns: {list(df.columns)}")
-            # logger.info(f"✓ Memory usage: {df.memory_usage(deep=True).sum() / 1024**2:.2f} MB")
-            
-            ############### PYSPARK CODES ###########################
             logger.info(f"✓ Successfully loaded Excel data - Shape: ({row_count}, {len(columns)})")
             logger.info(f"✓ Columns: {columns}")
             logger.info(f"✓ Partitions: {df.rdd.getNumPartitions()}")
@@ -237,7 +286,7 @@ class DataIngestorExcel(DataIngestor):
 class DataIngestorParquet(DataIngestor):
     """PySpark Parquet data ingestion implementation (new for PySpark)."""
     
-    def ingest(self, file_path_or_link: str, **options) -> DataFrame:
+    def ingest(self, file_path_or_link: str, **options) -> Union[pd.DataFrame, object]:
         """
         Ingest Parquet data using PySpark.
         Note: Parquet is a columnar format optimized for big data processing.
@@ -303,61 +352,3 @@ class DataIngestorFactory:
         else:
             raise ValueError(f"Unsupported file type: {file_extension}")
 
-
-def smoke_test_s3a_read():
-    """Smoke test for S3A CSV reading"""
-    # Define S3 constants
-    from utils.config import get_s3_bucket
-    S3_BUCKET = get_s3_bucket()
-    S3_KEY = "data/raw/ChurnModelling.csv"
-    S3A_URI = f"s3a://{S3_BUCKET}/{S3_KEY}"
-    LOCAL_PATH = "data/raw/ChurnModelling.csv"
-    
-    print("🧪 Testing S3A CSV reading...")
-    
-    try:
-        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-        if project_root not in sys.path:
-            sys.path.insert(0, project_root)
-        src_path = os.path.join(project_root, 'src')
-        if src_path not in sys.path:
-            sys.path.insert(0, src_path)
-        from utils.spark_session import create_spark_session
-        from utils.s3_io import key_exists
-
-        # Create Spark session with S3A support
-        spark = create_spark_session("S3A_SmokeTest")
-        
-        # Check which path to test
-        try:
-            if key_exists(S3_KEY):
-                test_path = S3A_URI
-                print(f"✅ S3 object exists, testing S3A: {test_path}")
-            else:
-                test_path = LOCAL_PATH
-                print(f"⚠️ S3 object not found, testing local: {test_path}")
-        except Exception:
-            test_path = LOCAL_PATH
-            print(f"⚠️ S3 check failed, testing local: {test_path}")
-        
-        # Test read
-        df = spark.read.option("header", "true").csv(test_path).limit(1)
-        result = df.collect()
-        
-        print(f"✅ S3A smoke test passed! Read {len(result)} row(s)")
-        print(f"📊 Columns: {df.columns}")
-        
-        spark.stop()
-        return True
-        
-    except Exception as e:
-        print(f"❌ S3A smoke test failed: {e}")
-        try:
-            spark.stop()
-        except:
-            pass
-        return False
-
-
-if __name__ == "__main__":
-    smoke_test_s3a_read()

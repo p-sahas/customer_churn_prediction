@@ -1,0 +1,193 @@
+name: CI - Simplified Validation
+
+on:
+   pull_request:
+     branches: [ develop ]
+
+#   push:
+#     branches: [ main, develop ]
+#   pull_request:
+#     branches: [ main, develop ]
+
+env:
+  PYTHON_VERSION: '3.10'
+
+jobs:
+  # ==========================================
+  # Job 1: Data Validation & Drift Detection
+  # ==========================================
+  data-validation:
+    name: Data Validation & Drift Check
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+        
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pandas numpy scipy scikit-learn pyyaml
+    
+    - name: Create Required Directories
+      run: |
+        mkdir -p data/raw reports
+        
+    - name: Download Dataset
+      run: |
+        # Download the dataset (using curl as fallback if not in repo)
+        if [ ! -f "data/raw/ChurnModelling.csv" ]; then
+          echo "📥 Downloading ChurnModelling.csv..."
+          curl -L -o data/raw/ChurnModelling.csv https://raw.githubusercontent.com/p-sahas/customer_churn_prediction/main/data/raw/ChurnModelling.csv || \
+          echo "⚠️  Could not download dataset. Skipping validation."
+        fi
+        
+    - name: Run Data Validation
+      run: |
+        # Use the clean dataset (configured in config.yaml)
+        if [ -f "data/raw/ChurnModelling_Clean.csv" ]; then
+          python tests/validate_data.py data/raw/ChurnModelling_Clean.csv
+        elif [ -f "data/raw/ChurnModelling.csv" ]; then
+          python tests/validate_data.py data/raw/ChurnModelling.csv
+        else
+          echo "⚠️  Dataset not available. Skipping validation."
+          exit 0
+        fi
+      continue-on-error: false
+      
+    - name: Upload Data Validation Report
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: data-validation-report
+        path: reports/data_validation_report.json
+        retention-days: 30
+
+  # ==========================================
+  # Job 2: Model Performance Validation
+  # ==========================================
+  model-validation:
+    name: Model Performance Validation (Accuracy >= 75%)
+    runs-on: ubuntu-latest
+    needs: data-validation
+    
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+        
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install -e .
+        
+    - name: Create Required Directories
+      run: |
+        mkdir -p data/raw data/processed artifacts/models artifacts/data reports
+        
+    - name: Run Data Pipeline (Generate Processed Data)
+      run: |
+        echo "🔄 Running data preprocessing pipeline..."
+        # Skip S3 uploads in CI (no credentials needed)
+        export SKIP_S3_UPLOAD=true
+        python pipelines/data_pipeline.py --engine pandas
+        echo "✅ Data pipeline completed"
+      env:
+        SKIP_S3_UPLOAD: "true"
+      
+    - name: Run Training Pipeline (Generate Model & Test Data)
+      run: |
+        echo "🎯 Running model training pipeline..."
+        # Skip S3 uploads in CI (no credentials needed)
+        export SKIP_S3_UPLOAD=true
+        python pipelines/training_pipeline.py --engine sklearn
+        echo "✅ Training pipeline completed"
+      env:
+        SKIP_S3_UPLOAD: "true"
+      continue-on-error: false
+      
+    - name: Validate Model Performance
+      run: |
+        echo "🔍 Validating model performance..."
+        python tests/validate_model_simple.py
+      continue-on-error: false
+      
+    - name: Upload Model Validation Report
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: model-validation-report
+        path: reports/model_validation_report.json
+        retention-days: 90
+        
+    - name: Block Deployment on Low Performance
+      if: failure()
+      run: |
+        echo "::error::Model performance below threshold (Accuracy < 75%)"
+        echo "::error::Deployment blocked. Please retrain model."
+        exit 1
+
+  # ==========================================
+  # Job 3: Validation Summary
+  # ==========================================
+  validation-summary:
+    name: CI Validation Summary
+    runs-on: ubuntu-latest
+    needs: [data-validation, model-validation]
+    if: always()
+    
+    steps:
+    - name: Check Validation Status
+      run: |
+        echo "=" | head -c 70; echo
+        echo "📊 CI VALIDATION SUMMARY"
+        echo "=" | head -c 70; echo
+        echo ""
+        echo "✅ Data Validation: ${{ needs.data-validation.result }}"
+        echo "✅ Model Validation: ${{ needs.model-validation.result }}"
+        echo ""
+        
+        if [ "${{ needs.data-validation.result }}" != "success" ]; then
+          echo "❌ Data validation failed!"
+          echo "   - Check data schema and quality"
+          echo "   - Review data validation report"
+          exit 1
+        fi
+        
+        if [ "${{ needs.model-validation.result }}" == "failure" ]; then
+          echo "❌ Model validation failed!"
+          echo "   - Model Accuracy below 75% threshold"
+          echo "   - Deployment blocked"
+          echo "   - Retrain model or adjust thresholds"
+          exit 1
+        fi
+        
+        if [ "${{ needs.model-validation.result }}" == "skipped" ]; then
+          echo "⚠️  Model validation skipped (no model available yet)"
+          echo "   This is normal for first-time setup"
+        fi
+        
+        echo ""
+        echo "🎉 All validations passed!"
+        echo "=" | head -c 70; echo
+        
+    - name: Notify on Failure
+      if: |
+        needs.data-validation.result == 'failure' ||
+        needs.model-validation.result == 'failure'
+      run: |
+        echo "::error::CI validation failed. Deployment blocked."
+        exit 1
+

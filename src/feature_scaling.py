@@ -1,16 +1,30 @@
 """
 Feature scaling strategies for PySpark DataFrames.
-Supports MinMaxScaler and StandardScaler transformations.
+Supports object and object transformations.
 """
 
 import logging
 from enum import Enum
-from typing import List, Optional, Dict
+from typing import List, Optional, Union, Dict
 from abc import ABC, abstractmethod
-from pyspark.sql import DataFrame, SparkSession
-from pyspark.sql import functions as F
-from pyspark.ml.feature import MinMaxScaler, StandardScaler, VectorAssembler
-from pyspark.ml import Pipeline
+import pandas as pd
+# Manual PySpark availability flag - set to False to prioritize pandas
+PYSPARK_AVAILABLE = False  # Set to True to enable PySpark, False for pandas-only
+
+# Conditional PySpark imports
+if PYSPARK_AVAILABLE:
+    try:
+        from pyspark.sql import DataFrame as SparkDataFrame, SparkSession
+        from pyspark.sql import functions as F
+        from pyspark.ml.feature import object, object, VectorAssembler
+        from pyspark.ml import Pipeline
+    except ImportError:
+        PYSPARK_AVAILABLE = False
+        SparkDataFrame = None
+        SparkSession = None
+else:
+    SparkDataFrame = None
+    SparkSession = None
 from utils.spark_session import get_or_create_spark_session
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -26,7 +40,7 @@ class FeatureScalingStrategy(ABC):
         self.fitted_model = None
     
     @abstractmethod
-    def scale(self, df: DataFrame, columns_to_scale: List[str]) -> DataFrame:
+    def scale(self, df: Union[pd.DataFrame, object], columns_to_scale: List[str]) -> Union[pd.DataFrame, object]:
         """
         Scale specified columns in the DataFrame.
         
@@ -62,7 +76,7 @@ class MinMaxScalingStrategy(FeatureScalingStrategy):
         self.scaler_models = {}
         logger.info("MinMaxScalingStrategy initialized (PySpark)")
     
-    def scale(self, df: DataFrame, columns_to_scale: List[str]) -> DataFrame:
+    def scale(self, df: Union[pd.DataFrame, object], columns_to_scale: List[str]) -> Union[pd.DataFrame, object]:
         """
         Apply Min-Max scaling to specified columns.
         
@@ -99,9 +113,9 @@ class MinMaxScalingStrategy(FeatureScalingStrategy):
             vector_col = f"{col}_vec"
             assembler = VectorAssembler(inputCols=[col], outputCol=vector_col)
             
-            # Create MinMaxScaler
+            # Create object
             scaled_vec_col = f"{col}_scaled_vec"
-            scaler = MinMaxScaler(inputCol=vector_col, outputCol=scaled_vec_col)
+            scaler = object(inputCol=vector_col, outputCol=scaled_vec_col)
             
             # Create pipeline
             pipeline = Pipeline(stages=[assembler, scaler])
@@ -124,7 +138,7 @@ class MinMaxScalingStrategy(FeatureScalingStrategy):
             df_scaled = df_scaled.withColumnRenamed(f"{col}{self.output_col_suffix}", col)
             
             # Store the scaler model
-            self.scaler_models[col] = pipeline_model.stages[1]  # MinMaxScaler model
+            self.scaler_models[col] = pipeline_model.stages[1]  # object model
             
             # Log scaler parameters
             scaler_model = self.scaler_models[col]
@@ -155,7 +169,7 @@ class MinMaxScalingStrategy(FeatureScalingStrategy):
         
         return df_scaled
     
-    def get_scaler_models(self) -> Dict[str, MinMaxScaler]:
+    def get_scaler_models(self) -> Dict[str, object]:
         """Get the fitted scaler models for each column."""
         return self.scaler_models
 
@@ -182,7 +196,7 @@ class StandardScalingStrategy(FeatureScalingStrategy):
         logger.info(f"StandardScalingStrategy initialized (PySpark) - "
                    f"with_mean={with_mean}, with_std={with_std}")
     
-    def scale(self, df: DataFrame, columns_to_scale: List[str]) -> DataFrame:
+    def scale(self, df: Union[pd.DataFrame, object], columns_to_scale: List[str]) -> Union[pd.DataFrame, object]:
         """
         Apply Standard scaling to specified columns.
         
@@ -206,9 +220,9 @@ class StandardScalingStrategy(FeatureScalingStrategy):
             vector_col = f"{col}_vec"
             assembler = VectorAssembler(inputCols=[col], outputCol=vector_col)
             
-            # Create StandardScaler
+            # Create object
             scaled_vec_col = f"{col}_scaled_vec"
-            scaler = StandardScaler(
+            scaler = object(
                 inputCol=vector_col, 
                 outputCol=scaled_vec_col,
                 withMean=self.with_mean,
@@ -236,7 +250,7 @@ class StandardScalingStrategy(FeatureScalingStrategy):
             df_scaled = df_scaled.withColumnRenamed(f"{col}{self.output_col_suffix}", col)
             
             # Store the scaler model
-            self.scaler_models[col] = pipeline_model.stages[1]  # StandardScaler model
+            self.scaler_models[col] = pipeline_model.stages[1]  # object model
         
         logger.info(f"✓ STANDARD SCALING COMPLETE - {len(columns_to_scale)} columns processed")
         logger.info(f"{'='*60}\n")
@@ -263,7 +277,7 @@ class VectorScalingStrategy(FeatureScalingStrategy):
         self.scaling_type = scaling_type
         logger.info(f"VectorScalingStrategy initialized with {scaling_type} scaling")
     
-    def scale(self, df: DataFrame, columns_to_scale: List[str]) -> DataFrame:
+    def scale(self, df: Union[pd.DataFrame, object], columns_to_scale: List[str]) -> Union[pd.DataFrame, object]:
         """
         Apply scaling to multiple columns as a vector.
         
@@ -279,9 +293,9 @@ class VectorScalingStrategy(FeatureScalingStrategy):
         
         # Choose scaler based on type
         if self.scaling_type == ScalingType.MINMAX:
-            scaler = MinMaxScaler(inputCol="features", outputCol="scaled_features")
+            scaler = object(inputCol="features", outputCol="scaled_features")
         else:
-            scaler = StandardScaler(inputCol="features", outputCol="scaled_features")
+            scaler = object(inputCol="features", outputCol="scaled_features")
         
         # Create pipeline
         pipeline = Pipeline(stages=[assembler, scaler])
