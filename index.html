@@ -1,0 +1,775 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Customer Churn Prediction — Production ML System</title>
+
+  <meta property="og:title" content="Customer Churn Prediction — Production ML System" />
+  <meta property="og:description" content="End-to-end production ML pipeline with Kafka streaming, Airflow orchestration, MLflow tracking, and AWS deployment." />
+  <meta property="og:image" content="https://p-sahas.github.io/customer_churn_prediction/thumbnail.png" />
+  <meta property="og:url" content="https://p-sahas.github.io/customer_churn_prediction/" />
+  <meta name="twitter:card" content="summary_large_image" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500&family=Bebas+Neue&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500&display=swap" rel="stylesheet">
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #03070d;
+      --bg2:      #060e18;
+      --surface:  #080f1a;
+      --border:   rgba(255,255,255,.07);
+      --border2:  rgba(255,255,255,.13);
+      --gold:     #c9a84c;
+      --gold-dim: rgba(201,168,76,.12);
+      --ice:      #a8c8e8;
+      --text:     #cdd8e3;
+      --muted:    #4d6070;
+      --faint:    #1a2535;
+      --mono:     'DM Mono', monospace;
+      --display:  'Bebas Neue', sans-serif;
+      --body:     'DM Sans', sans-serif;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--body);
+      overflow-x: hidden;
+      cursor: none;
+    }
+
+    .cursor {
+      position: fixed; width: 10px; height: 10px;
+      background: var(--gold); border-radius: 50%;
+      pointer-events: none; z-index: 9999;
+      transform: translate(-50%,-50%);
+      mix-blend-mode: difference;
+    }
+    .cursor-ring {
+      position: fixed; width: 38px; height: 38px;
+      border: 1px solid var(--gold); border-radius: 50%;
+      pointer-events: none; z-index: 9998;
+      transform: translate(-50%,-50%);
+      transition: width .2s, height .2s, opacity .2s;
+      opacity: .45;
+    }
+
+    body::before {
+      content: ''; position: fixed; inset: 0; z-index: 0;
+      background: repeating-linear-gradient(
+        0deg, transparent, transparent 2px,
+        rgba(0,0,0,.07) 2px, rgba(0,0,0,.07) 4px
+      );
+      pointer-events: none;
+    }
+    body::after {
+      content: ''; position: fixed; inset: 0; z-index: 0;
+      background: radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,.65) 100%);
+      pointer-events: none;
+    }
+
+    /* ── NAV ── */
+    nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 20px 48px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(3,7,13,.85);
+      backdrop-filter: blur(20px);
+    }
+    .nav-logo { font-family: var(--mono); font-size: 11px; letter-spacing: .2em; text-transform: uppercase; color: var(--gold); }
+    .nav-links { display: flex; gap: 32px; list-style: none; }
+    .nav-links a { font-family: var(--mono); font-size: 10px; letter-spacing: .18em; text-transform: uppercase; color: var(--muted); text-decoration: none; transition: color .2s; }
+    .nav-links a:hover { color: var(--text); }
+    .nav-status { display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 10px; letter-spacing: .12em; color: var(--muted); }
+    .status-dot { width: 6px; height: 6px; background: #3ddc84; border-radius: 50%; box-shadow: 0 0 8px #3ddc84; animation: blink 2.4s ease infinite; }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.2} }
+
+    /* ── HERO ── */
+    .hero {
+      position: relative; z-index: 1;
+      min-height: 100vh;
+      display: grid; grid-template-columns: 1fr 1fr;
+      align-items: center;
+      padding: 120px 48px 80px; gap: 80px;
+      overflow: hidden;
+    }
+    .hero-mesh {
+      position: absolute; inset: 0; z-index: 0;
+      background:
+        radial-gradient(ellipse 55% 50% at 75% 50%, rgba(201,168,76,.055) 0%, transparent 70%),
+        radial-gradient(ellipse 35% 55% at 15% 75%, rgba(168,200,232,.035) 0%, transparent 60%);
+      animation: meshShift 14s ease-in-out infinite alternate;
+    }
+    @keyframes meshShift { from{transform:scale(1)} to{transform:scale(1.04)} }
+    .hero-grid {
+      position: absolute; right: 0; top: 0; bottom: 0; width: 50%; z-index: 0; overflow: hidden;
+    }
+    .hero-grid::before {
+      content: ''; position: absolute; inset: 0;
+      background-image: linear-gradient(var(--border) 1px, transparent 1px), linear-gradient(90deg, var(--border) 1px, transparent 1px);
+      background-size: 48px 48px;
+    }
+
+    .hero-left { position: relative; z-index: 2; }
+
+    .hero-eyebrow { display: flex; align-items: center; gap: 12px; margin-bottom: 28px; animation: fadeUp .8s ease both; }
+    .eyebrow-line { width: 32px; height: 1px; background: var(--gold); }
+    .eyebrow-text { font-family: var(--mono); font-size: 10px; letter-spacing: .22em; text-transform: uppercase; color: var(--gold); }
+
+    h1 { font-family: var(--display); font-size: clamp(5rem, 9vw, 9rem); line-height: .92; letter-spacing: .01em; animation: fadeUp .8s .1s ease both; }
+    h1 .accent { color: var(--gold); }
+    h1 .outline { -webkit-text-stroke: 1px rgba(255,255,255,.18); color: transparent; }
+
+    .hero-desc { margin-top: 28px; font-size: .9rem; font-weight: 300; line-height: 1.8; color: var(--muted); max-width: 420px; animation: fadeUp .8s .2s ease both; }
+
+    .hero-actions { display: flex; align-items: center; gap: 20px; margin-top: 40px; animation: fadeUp .8s .3s ease both; }
+    .btn-primary {
+      display: inline-flex; align-items: center; gap: 10px;
+      background: var(--gold); color: #03070d;
+      font-family: var(--mono); font-size: 11px; font-weight: 500;
+      letter-spacing: .14em; text-transform: uppercase;
+      padding: 14px 28px; text-decoration: none;
+      clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px));
+      transition: opacity .2s, transform .2s;
+    }
+    .btn-primary:hover { opacity: .82; transform: translateY(-2px); }
+    .btn-ghost {
+      font-family: var(--mono); font-size: 11px; letter-spacing: .14em;
+      text-transform: uppercase; color: var(--muted); text-decoration: none;
+      border-bottom: 1px solid var(--border2); padding-bottom: 2px;
+      transition: color .2s, border-color .2s;
+    }
+    .btn-ghost:hover { color: var(--text); border-color: var(--text); }
+
+    /* hero right — language breakdown (real data) */
+    .hero-panel {
+      position: relative; z-index: 2;
+      border: 1px solid var(--border2); background: var(--surface);
+      animation: fadeUp .8s .2s ease both;
+      clip-path: polygon(0 0, calc(100% - 18px) 0, 100% 18px, 100% 100%, 18px 100%, 0 calc(100% - 18px));
+    }
+    .panel-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 20px; border-bottom: 1px solid var(--border);
+    }
+    .panel-title { font-family: var(--mono); font-size: 10px; letter-spacing: .18em; text-transform: uppercase; color: var(--muted); }
+    .panel-dots { display: flex; gap: 6px; }
+    .panel-dots span { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); }
+    .panel-dots span:nth-child(1) { background: #ff5f57; }
+    .panel-dots span:nth-child(2) { background: #febc2e; }
+    .panel-dots span:nth-child(3) { background: #28c840; }
+
+    .lang-list { padding: 8px 0; }
+    .lang-row {
+      display: flex; align-items: center;
+      padding: 14px 20px; border-bottom: 1px solid var(--border); gap: 16px;
+    }
+    .lang-row:last-child { border-bottom: none; }
+    .lang-name { font-family: var(--mono); font-size: 10px; letter-spacing: .12em; color: var(--muted); text-transform: uppercase; width: 110px; flex-shrink: 0; }
+    .lang-bar-wrap { flex: 1; height: 2px; background: var(--faint); position: relative; }
+    .lang-bar {
+      position: absolute; top: 0; left: 0; bottom: 0;
+      transform-origin: left;
+      animation: growBar 1.4s .6s cubic-bezier(.16,1,.3,1) both;
+    }
+    @keyframes growBar { from{transform:scaleX(0)} to{transform:scaleX(1)} }
+    .lang-pct { font-family: var(--mono); font-size: 12px; width: 44px; text-align: right; flex-shrink: 0; }
+
+    .panel-footer {
+      padding: 16px 20px;
+      border-top: 1px solid var(--border);
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    .panel-stat { text-align: center; }
+    .panel-stat-val { font-family: var(--display); font-size: 1.8rem; color: var(--text); display: block; line-height: 1; }
+    .panel-stat-label { font-family: var(--mono); font-size: 9px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin-top: 4px; display: block; }
+    .panel-divider { width: 1px; height: 40px; background: var(--border); }
+
+    /* - STATS BAR - */
+    .stats-bar {
+      position: relative; z-index: 1;
+      display: grid; grid-template-columns: repeat(4, 1fr);
+      border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+    }
+    .stat-item { padding: 48px 40px; border-right: 1px solid var(--border); position: relative; overflow: hidden; }
+    .stat-item:last-child { border-right: none; }
+    .stat-item::before {
+      content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px;
+      background: var(--gold); transform: scaleX(0); transform-origin: left;
+      transition: transform .4s ease;
+    }
+    .stat-item:hover::before { transform: scaleX(1); }
+    .stat-num { font-family: var(--display); font-size: 3.8rem; line-height: 1; color: var(--text); display: block; }
+    .stat-suffix { font-family: var(--display); font-size: 2rem; color: var(--gold); }
+    .stat-desc { font-family: var(--mono); font-size: 10px; letter-spacing: .15em; text-transform: uppercase; color: var(--muted); margin-top: 10px; display: block; }
+
+    /* ── SECTION COMMON ── */
+    .section { position: relative; z-index: 1; max-width: 1100px; margin: 0 auto; padding: 100px 48px; }
+    .section-head { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; align-items: end; margin-bottom: 64px; }
+    .section-tag { font-family: var(--mono); font-size: 10px; letter-spacing: .22em; text-transform: uppercase; color: var(--gold); margin-bottom: 14px; display: flex; align-items: center; gap: 10px; }
+    .section-tag::before { content: ''; display: block; width: 24px; height: 1px; background: var(--gold); }
+    .section-title { font-family: var(--display); font-size: clamp(2.8rem, 5vw, 4.5rem); line-height: .95; }
+    .section-body { font-size: .88rem; font-weight: 300; line-height: 1.9; color: var(--muted); align-self: end; }
+
+    /* ── PIPELINE ── */
+    .pipeline-wrap { position: relative; }
+    .pipeline-line {
+      position: absolute; top: 36px; left: 36px; right: 36px; height: 1px;
+      background: linear-gradient(90deg, var(--gold) 0%, var(--ice) 100%);
+      opacity: .25; z-index: 0;
+    }
+    .pipeline { display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; position: relative; z-index: 1; }
+    .pipe-node { display: flex; flex-direction: column; align-items: center; text-align: center; }
+    .pipe-icon-wrap {
+      width: 72px; height: 72px;
+      border: 1px solid var(--border2); background: var(--surface);
+      display: flex; align-items: center; justify-content: center;
+      margin-bottom: 20px;
+      clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px));
+      transition: border-color .3s, background .3s; position: relative;
+    }
+    .pipe-node:hover .pipe-icon-wrap { border-color: var(--gold); background: var(--gold-dim); }
+    .pipe-icon-wrap svg { width: 24px; height: 24px; stroke: var(--gold); fill: none; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+    .pipe-step-num {
+      position: absolute; top: -8px; right: -8px;
+      width: 18px; height: 18px; background: var(--gold); color: var(--bg);
+      font-family: var(--mono); font-size: 9px; font-weight: 500;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .pipe-name { font-family: var(--mono); font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--text); margin-bottom: 8px; }
+    .pipe-sub { font-size: .78rem; color: var(--muted); line-height: 1.5; font-weight: 300; }
+
+    /* ── ARCH GRID ── */
+    .arch-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--border); border: 1px solid var(--border); }
+    .arch-cell { background: var(--bg2); padding: 36px 32px; position: relative; overflow: hidden; transition: background .3s; }
+    .arch-cell:hover { background: var(--surface); }
+    .arch-cell::after {
+      content: attr(data-num); position: absolute; bottom: -10px; right: 12px;
+      font-family: var(--display); font-size: 5rem; color: var(--faint); line-height: 1;
+      pointer-events: none; transition: color .3s;
+    }
+    .arch-cell:hover::after { color: rgba(201,168,76,.1); }
+    .arch-cell-tag { font-family: var(--mono); font-size: 9px; letter-spacing: .2em; text-transform: uppercase; color: var(--gold); margin-bottom: 14px; display: block; }
+    .arch-cell h3 { font-family: var(--body); font-weight: 500; font-size: 1.05rem; margin-bottom: 12px; line-height: 1.3; }
+    .arch-cell p { font-size: .83rem; font-weight: 300; color: var(--muted); line-height: 1.75; }
+    .arch-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 18px; }
+    .arch-tag { font-family: var(--mono); font-size: 9px; letter-spacing: .1em; padding: 3px 9px; border: 1px solid var(--border2); color: var(--muted); text-transform: uppercase; }
+
+    /* ── TERMINAL ── */
+    .terminal-section {
+      position: relative; z-index: 1;
+      background: var(--bg2); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+      padding: 80px 48px;
+    }
+    .terminal-inner { max-width: 1100px; margin: 0 auto; display: grid; grid-template-columns: 1fr 1.4fr; gap: 64px; align-items: center; }
+    .terminal {
+      border: 1px solid var(--border2); background: #020609;
+      font-family: var(--mono); font-size: 12px; line-height: 1.8;
+      clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px));
+    }
+    .terminal-bar { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--border); background: rgba(255,255,255,.02); }
+    .terminal-bar span { width: 9px; height: 9px; border-radius: 50%; }
+    .t-red{background:#ff5f57} .t-yel{background:#febc2e} .t-grn{background:#28c840}
+    .terminal-path { font-family: var(--mono); font-size: 10px; color: var(--muted); margin-left: auto; letter-spacing: .08em; }
+    .terminal-body { padding: 20px 20px 24px; }
+    .t-line { display: block; }
+    .t-prompt { color: var(--gold); }
+    .t-cmd    { color: var(--text); }
+    .t-out    { color: var(--muted); }
+    .t-success{ color: #3ddc84; }
+    .t-cursor { display: inline-block; width: 7px; height: 13px; background: var(--gold); vertical-align: middle; animation: cursorBlink .9s step-end infinite; }
+    @keyframes cursorBlink { 0%,100%{opacity:1} 50%{opacity:0} }
+
+    /* ── TECH LIST ── */
+    .tech-list { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0; }
+    .tech-row { display: flex; align-items: center; padding: 22px 0; border-bottom: 1px solid var(--border); gap: 20px; }
+    .tech-row:nth-child(odd)  { padding-right: 40px; border-right: 1px solid var(--border); }
+    .tech-row:nth-child(even) { padding-left: 40px; }
+    .tech-num { font-family: var(--mono); font-size: 10px; color: var(--muted); width: 28px; flex-shrink: 0; }
+    .tech-name { font-weight: 500; font-size: .95rem; flex: 1; }
+    .tech-role { font-family: var(--mono); font-size: 10px; color: var(--muted); letter-spacing: .08em; }
+    .tech-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--gold); flex-shrink: 0; opacity: .4; }
+
+    /* ── CTA ── */
+    .cta-section { position: relative; z-index: 1; padding: 120px 48px; text-align: center; overflow: hidden; }
+    .cta-glow {
+      position: absolute; width: 600px; height: 600px;
+      background: radial-gradient(ellipse, rgba(201,168,76,.3) 0%, transparent 70%);
+      top: 50%; left: 50%; transform: translate(-50%,-50%);
+      pointer-events: none; opacity: .2;
+      animation: glowPulse 6s ease-in-out infinite;
+    }
+    @keyframes glowPulse { 0%,100%{transform:translate(-50%,-50%) scale(1)} 50%{transform:translate(-50%,-50%) scale(1.15)} }
+    .cta-inner { position: relative; z-index: 1; max-width: 680px; margin: 0 auto; }
+    .cta-label {
+      font-family: var(--mono); font-size: 10px; letter-spacing: .22em; text-transform: uppercase;
+      color: var(--gold); margin-bottom: 20px;
+      display: flex; align-items: center; justify-content: center; gap: 12px;
+    }
+    .cta-label::before,.cta-label::after { content:''; display:block; width:40px; height:1px; background:var(--gold); opacity:.4; }
+    .cta-h { font-family: var(--display); font-size: clamp(3rem, 7vw, 6rem); line-height: .92; margin-bottom: 24px; }
+    .cta-p { font-size: .9rem; font-weight: 300; color: var(--muted); line-height: 1.8; margin-bottom: 44px; }
+
+    /* ── FOOTER ── */
+    footer {
+      position: relative; z-index: 1;
+      border-top: 1px solid var(--border); padding: 32px 48px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .footer-left { font-family: var(--mono); font-size: 10px; letter-spacing: .14em; color: var(--muted); }
+    .footer-right { display: flex; gap: 28px; }
+    .footer-right a { font-family: var(--mono); font-size: 10px; letter-spacing: .12em; color: var(--muted); text-decoration: none; text-transform: uppercase; transition: color .2s; }
+    .footer-right a:hover { color: var(--gold); }
+
+    /* ── ANIMATIONS ── */
+    @keyframes fadeUp { from{opacity:0;transform:translateY(30px)} to{opacity:1;transform:translateY(0)} }
+    .reveal { opacity: 0; transform: translateY(24px); transition: opacity .7s ease, transform .7s ease; }
+    .reveal.visible { opacity: 1; transform: translateY(0); }
+
+    /* ── RESPONSIVE ── */
+    @media (max-width: 900px) {
+      nav { padding: 16px 24px; }
+      .nav-links { display: none; }
+      .hero { grid-template-columns: 1fr; padding: 100px 24px 60px; gap: 40px; }
+      .hero-grid { display: none; }
+      .stats-bar { grid-template-columns: repeat(2, 1fr); }
+      .section { padding: 70px 24px; }
+      .section-head { grid-template-columns: 1fr; gap: 16px; }
+      .pipeline { grid-template-columns: 1fr; }
+      .pipeline-line { display: none; }
+      .arch-grid { grid-template-columns: 1fr; }
+      .tech-list { grid-template-columns: 1fr; }
+      .tech-row:nth-child(odd)  { padding-right: 0; border-right: none; }
+      .tech-row:nth-child(even) { padding-left: 0; }
+      .terminal-inner { grid-template-columns: 1fr; gap: 40px; }
+      .cta-section { padding: 80px 24px; }
+      footer { flex-direction: column; gap: 16px; text-align: center; padding: 24px; }
+    }
+
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: var(--bg); }
+    ::-webkit-scrollbar-thumb { background: var(--faint); }
+  </style>
+</head>
+<body>
+
+  <div class="cursor" id="cursor"></div>
+  <div class="cursor-ring" id="cursorRing"></div>
+
+  <!-- NAV -->
+  <nav>
+    <div class="nav-logo">p-sahas / customer_churn_prediction</div>
+    <ul class="nav-links">
+      <li><a href="#pipeline">Pipeline</a></li>
+      <li><a href="#architecture">Architecture</a></li>
+      <li><a href="#stack">Stack</a></li>
+    </ul>
+    <div class="nav-status">
+      <span class="status-dot"></span>
+      Production Ready
+    </div>
+  </nav>
+
+  <!-- HERO -->
+  <section class="hero">
+    <div class="hero-mesh"></div>
+    <div class="hero-grid"></div>
+
+    <div class="hero-left">
+      <div class="hero-eyebrow">
+        <div class="eyebrow-line"></div>
+        <span class="eyebrow-text">MLOps · Banking Domain · Production Grade</span>
+      </div>
+      <h1>
+        <div>CUSTOMER</div>
+        <div class="accent">CHURN</div>
+        <div class="outline">PREDICTION</div>
+      </h1>
+      <p class="hero-desc">
+        A complete, production-grade machine learning system for predicting customer churn 
+        in a banking context — with real-time streaming, automated training pipelines, 
+        and comprehensive CI/CD validation.
+      </p>
+      <div class="hero-actions">
+        <a class="btn-primary" href="https://github.com/p-sahas/customer_churn_prediction" target="_blank">
+          View Repository
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17L17 7M17 7H7M17 7v10"/></svg>
+        </a>
+        <a class="btn-ghost" href="#pipeline">Explore System</a>
+      </div>
+    </div>
+
+    <!-- Language breakdown — sourced directly from GitHub repo stats -->
+    <div class="hero-panel">
+      <div class="panel-header">
+        <span class="panel-title">Repository — Language Breakdown</span>
+        <div class="panel-dots"><span></span><span></span><span></span></div>
+      </div>
+      <div class="lang-list">
+        <div class="lang-row">
+          <span class="lang-name">Python</span>
+          <div class="lang-bar-wrap"><div class="lang-bar" style="width:85.9%;background:#3572A5"></div></div>
+          <span class="lang-pct" style="color:#3572A5">85.9%</span>
+        </div>
+        <div class="lang-row">
+          <span class="lang-name">Makefile</span>
+          <div class="lang-bar-wrap"><div class="lang-bar" style="width:7.1%;background:var(--gold);animation-delay:.1s"></div></div>
+          <span class="lang-pct" style="color:var(--gold)">7.1%</span>
+        </div>
+        <div class="lang-row">
+          <span class="lang-name">Shell</span>
+          <div class="lang-bar-wrap"><div class="lang-bar" style="width:5.3%;background:var(--ice);animation-delay:.2s"></div></div>
+          <span class="lang-pct" style="color:var(--ice)">5.3%</span>
+        </div>
+        <div class="lang-row">
+          <span class="lang-name">PLpgSQL</span>
+          <div class="lang-bar-wrap"><div class="lang-bar" style="width:1.7%;background:#6b8e6b;animation-delay:.3s"></div></div>
+          <span class="lang-pct" style="color:#6b8e6b">1.7%</span>
+        </div>
+      </div>
+      <div class="panel-footer">
+        <div class="panel-stat">
+          <span class="panel-stat-val">157</span>
+          <span class="panel-stat-label">Commits</span>
+        </div>
+        <div class="panel-divider"></div>
+        <div class="panel-stat">
+          <span class="panel-stat-val">MIT</span>
+          <span class="panel-stat-label">License</span>
+        </div>
+        <!--
+        <div class="panel-divider"></div>
+        <div class="panel-stat">
+          <span class="panel-stat-val">3</span>
+          <span class="panel-stat-label">Stars</span>
+        </div>
+      -->
+      </div>
+    </div>
+  </section>
+
+  <!-- STATS BAR -->
+  <div class="stats-bar">
+    <div class="stat-item reveal">
+      <span class="stat-num">157<span class="stat-suffix">+</span></span>
+      <span class="stat-desc">Commits</span>
+    </div>
+    <div class="stat-item reveal">
+      <span class="stat-num">4</span>
+      <span class="stat-desc">Languages</span>
+    </div>
+<!--
+    <div class="stat-item reveal">
+      <span class="stat-num">3</span>
+      <span class="stat-desc">AWS Services</span>
+    </div>
+-->
+    <div class="stat-item reveal">
+      <span class="stat-num">E2E</span>
+      <span class="stat-desc">Pipeline Coverage</span>
+    </div>
+  </div>
+
+  <!-- PIPELINE -->
+  <section class="section" id="pipeline">
+    <div class="section-head reveal">
+      <div>
+        <div class="section-tag">01 — Data Flow</div>
+        <h2 class="section-title">ML Pipeline Architecture</h2>
+      </div>
+      <p class="section-body">
+        Five-stage automated pipeline from raw event ingestion through real-time 
+        Kafka streams to cloud-deployed model inference, orchestrated by Apache Airflow.
+      </p>
+    </div>
+
+    <div class="pipeline-wrap reveal">
+      <div class="pipeline-line"></div>
+      <div class="pipeline">
+        <div class="pipe-node">
+          <div class="pipe-icon-wrap">
+            <span class="pipe-step-num">01</span>
+            <svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+          </div>
+          <div class="pipe-name">Ingestion</div>
+          <div class="pipe-sub">Confluent Kafka real-time event streams</div>
+        </div>
+        <div class="pipe-node">
+          <div class="pipe-icon-wrap">
+            <span class="pipe-step-num">02</span>
+            <svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+          </div>
+          <div class="pipe-name">Processing</div>
+          <div class="pipe-sub">PySpark distributed data transformation</div>
+        </div>
+        <div class="pipe-node">
+          <div class="pipe-icon-wrap">
+            <span class="pipe-step-num">03</span>
+            <svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+          </div>
+          <div class="pipe-name">Training</div>
+          <div class="pipe-sub">Automated model training pipeline</div>
+        </div>
+        <div class="pipe-node">
+          <div class="pipe-icon-wrap">
+            <span class="pipe-step-num">04</span>
+            <svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+          </div>
+          <div class="pipe-name">Tracking</div>
+          <div class="pipe-sub">MLflow experiment and model registry</div>
+        </div>
+        <div class="pipe-node">
+          <div class="pipe-icon-wrap">
+            <span class="pipe-step-num">05</span>
+            <svg viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
+          </div>
+          <div class="pipe-name">Deployment</div>
+          <div class="pipe-sub">AWS ECS containerised model serving</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ARCHITECTURE -->
+  <section class="section" id="architecture">
+    <div class="section-head reveal">
+      <div>
+        <div class="section-tag">02 — System Design</div>
+        <h2 class="section-title">Core Components</h2>
+      </div>
+      <p class="section-body">
+        Each subsystem is independently containerised and communicates through 
+        well-defined interfaces, enabling horizontal scaling and fault isolation.
+      </p>
+    </div>
+
+    <div class="arch-grid reveal">
+      <div class="arch-cell" data-num="A">
+        <span class="arch-cell-tag">Orchestration</span>
+        <h3>Apache Airflow</h3>
+        <p>Scheduled DAG-based pipeline execution using DockerOperator for environment isolation. Manages dependencies, retries, and alerting across all pipeline stages.</p>
+        <div class="arch-tags">
+          <span class="arch-tag">DAGs</span>
+          <span class="arch-tag">DockerOperator</span>
+          <span class="arch-tag">Scheduling</span>
+        </div>
+      </div>
+      <div class="arch-cell" data-num="B">
+        <span class="arch-cell-tag">Streaming</span>
+        <h3>Confluent Kafka</h3>
+        <p>High-throughput real-time event streaming for customer transaction data ingestion. Enables low-latency signal detection at scale before the processing stage.</p>
+        <div class="arch-tags">
+          <span class="arch-tag">Topics</span>
+          <span class="arch-tag">Consumers</span>
+          <span class="arch-tag">Partitioning</span>
+        </div>
+      </div>
+      <div class="arch-cell" data-num="C">
+        <span class="arch-cell-tag">Experiment Tracking</span>
+        <h3>MLflow Registry</h3>
+        <p>Full lifecycle management of ML experiments with S3 artifact backend. Tracks parameters, metrics, and manages model versioning and stage transitions.</p>
+        <div class="arch-tags">
+          <span class="arch-tag">Experiments</span>
+          <span class="arch-tag">Model Registry</span>
+          <span class="arch-tag">S3 Backend</span>
+        </div>
+      </div>
+      <div class="arch-cell" data-num="D">
+        <span class="arch-cell-tag">Cloud Infrastructure</span>
+        <h3>AWS Services</h3>
+        <p>S3 for artifact and dataset storage, RDS for Airflow and MLflow metadata persistence, ECS Fargate for scalable containerised model serving.</p>
+        <div class="arch-tags">
+          <span class="arch-tag">S3</span>
+          <span class="arch-tag">RDS</span>
+          <span class="arch-tag">ECS Fargate</span>
+        </div>
+      </div>
+      <div class="arch-cell" data-num="E">
+        <span class="arch-cell-tag">Validation</span>
+        <h3>CI/CD Pipeline</h3>
+        <p>GitHub Actions workflows enforce code quality, run automated tests, validate Docker builds, and gate all deployments on passing checks.</p>
+        <div class="arch-tags">
+          <span class="arch-tag">GitHub Actions</span>
+          <span class="arch-tag">pytest</span>
+          <span class="arch-tag">Docker Lint</span>
+        </div>
+      </div>
+      <div class="arch-cell" data-num="F">
+        <span class="arch-cell-tag">Data Processing</span>
+        <h3>Hybrid Compute</h3>
+        <p>PySpark embedded in containers for distributed large-scale transformation. Pandas and Scikit-learn for flexible feature engineering and model training.</p>
+        <div class="arch-tags">
+          <span class="arch-tag">PySpark</span>
+          <span class="arch-tag">Pandas</span>
+          <span class="arch-tag">Scikit-learn</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- TERMINAL — shows real Makefile commands from the repo -->
+  <div class="terminal-section">
+    <div class="terminal-inner">
+      <div class="reveal">
+        <div class="section-tag">03 — Developer Experience</div>
+        <h2 style="font-family:var(--display);font-size:clamp(2.4rem,4vw,3.8rem);line-height:.95;margin-top:14px;">Makefile-Driven Workflow</h2>
+        <p style="font-size:.88rem;font-weight:300;color:var(--muted);line-height:1.9;margin-top:16px;">
+          The Makefile interface abstracts infrastructure complexity. Run the full 
+          production stack — Kafka, Airflow, MLflow, training, and inference — with 
+          single commands defined in the project Makefile.
+        </p>
+      </div>
+      <div class="terminal reveal">
+        <div class="terminal-bar">
+          <span class="t-red"></span><span class="t-yel"></span><span class="t-grn"></span>
+          <span class="terminal-path">~/customer_churn_prediction</span>
+        </div>
+        <div class="terminal-body">
+          <span class="t-line"><span class="t-prompt">$ </span><span class="t-cmd">make automation-up</span></span>
+          <span class="t-line t-out"># Starts Airflow + Docker pipeline services</span>
+          <span class="t-line">&nbsp;</span>
+          <span class="t-line"><span class="t-prompt">$ </span><span class="t-cmd">make docker-build</span></span>
+          <span class="t-line t-out"># Builds all project Docker images</span>
+          <span class="t-line">&nbsp;</span>
+          <span class="t-line"><span class="t-prompt">$ </span><span class="t-cmd">make docker-run-all</span></span>
+          <span class="t-line t-out"># Runs data → train → inference pipelines</span>
+          <span class="t-line">&nbsp;</span>
+          <span class="t-line"><span class="t-prompt">$ </span><span class="t-cmd">make s3-upload-data</span></span>
+          <span class="t-line t-out"># Uploads raw and processed data to S3</span>
+          <span class="t-line">&nbsp;</span>
+          <span class="t-line"><span class="t-prompt">$ </span><span class="t-cursor"></span></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TECH STACK -->
+  <section class="section" id="stack">
+    <div class="section-head reveal">
+      <div>
+        <div class="section-tag">04 — Technology</div>
+        <h2 class="section-title">Full Stack</h2>
+      </div>
+      <p class="section-body">
+        Every tool selected for production reliability, ecosystem maturity, 
+        and seamless interoperability across the pipeline.
+      </p>
+    </div>
+
+    <div class="tech-list reveal">
+      <div class="tech-row">
+        <span class="tech-num">01</span><span class="tech-dot"></span>
+        <span class="tech-name">Python 3.9+</span>
+        <span class="tech-role">Core Language</span>
+      </div>
+      <div class="tech-row">
+        <span class="tech-num">02</span><span class="tech-dot"></span>
+        <span class="tech-name">Apache Kafka</span>
+        <span class="tech-role">Event Streaming</span>
+      </div>
+      <div class="tech-row">
+        <span class="tech-num">03</span><span class="tech-dot"></span>
+        <span class="tech-name">Apache Airflow</span>
+        <span class="tech-role">Orchestration</span>
+      </div>
+      <div class="tech-row">
+        <span class="tech-num">04</span><span class="tech-dot"></span>
+        <span class="tech-name">MLflow</span>
+        <span class="tech-role">Experiment Tracking</span>
+      </div>
+      <div class="tech-row">
+        <span class="tech-num">05</span><span class="tech-dot"></span>
+        <span class="tech-name">Docker + Compose</span>
+        <span class="tech-role">Containerisation</span>
+      </div>
+      <div class="tech-row">
+        <span class="tech-num">06</span><span class="tech-dot"></span>
+        <span class="tech-name">AWS S3 / RDS / ECS</span>
+        <span class="tech-role">Cloud Infrastructure</span>
+      </div>
+      <div class="tech-row">
+        <span class="tech-num">07</span><span class="tech-dot"></span>
+        <span class="tech-name">PySpark</span>
+        <span class="tech-role">Distributed Processing</span>
+      </div>
+      <div class="tech-row">
+        <span class="tech-num">08</span><span class="tech-dot"></span>
+        <span class="tech-name">Scikit-learn</span>
+        <span class="tech-role">Model Training</span>
+      </div>
+      <div class="tech-row">
+        <span class="tech-num">09</span><span class="tech-dot"></span>
+        <span class="tech-name">GitHub Actions</span>
+        <span class="tech-role">CI/CD</span>
+      </div>
+      <div class="tech-row">
+        <span class="tech-num">10</span><span class="tech-dot"></span>
+        <span class="tech-name">PostgreSQL</span>
+        <span class="tech-role">Metadata Storage</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA -->
+  <section class="cta-section">
+    <div class="cta-glow"></div>
+    <div class="cta-inner reveal">
+      <div class="cta-label">Open Source · MIT License</div>
+      <h2 class="cta-h">EXPLORE THE<br>FULL SYSTEM</h2>
+      <p class="cta-p">
+        157 commits. Complete documentation. Production-ready infrastructure.<br>
+        Built as a reference architecture for modern MLOps.
+      </p>
+      <a class="btn-primary" href="https://github.com/p-sahas/customer_churn_prediction" target="_blank" style="font-size:12px;padding:16px 36px;">
+        View on GitHub
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17L17 7M17 7H7M17 7v10"/></svg>
+      </a>
+    </div>
+  </section>
+
+  <!-- FOOTER -->
+  <footer>
+    <div class="footer-left">p-sahas/customer_churn_prediction &nbsp;|&nbsp; MIT License</div>
+    <div class="footer-right">
+      <a href="https://github.com/p-sahas/customer_churn_prediction" target="_blank">GitHub</a>
+      <a href="https://github.com/p-sahas" target="_blank">Profile</a>
+    </div>
+  </footer>
+
+  <script>
+    // Custom cursor
+    const cursor = document.getElementById('cursor');
+    const ring   = document.getElementById('cursorRing');
+    let mx=0, my=0, rx=0, ry=0;
+    document.addEventListener('mousemove', e => { mx=e.clientX; my=e.clientY; });
+    (function loop() {
+      cursor.style.left = mx+'px'; cursor.style.top = my+'px';
+      rx += (mx-rx)*.12; ry += (my-ry)*.12;
+      ring.style.left = rx+'px'; ring.style.top = ry+'px';
+      requestAnimationFrame(loop);
+    })();
+    document.querySelectorAll('a,button').forEach(el => {
+      el.addEventListener('mouseenter', () => { ring.style.width='56px'; ring.style.height='56px'; ring.style.opacity='1'; });
+      el.addEventListener('mouseleave', () => { ring.style.width='38px'; ring.style.height='38px'; ring.style.opacity='.45'; });
+    });
+
+    // Scroll reveal
+    const io = new IntersectionObserver(entries => {
+      entries.forEach((e,i) => {
+        if (e.isIntersecting) {
+          setTimeout(() => e.target.classList.add('visible'), i*80);
+          io.unobserve(e.target);
+        }
+      });
+    }, { threshold: 0.1 });
+    document.querySelectorAll('.reveal').forEach(r => io.observe(r));
+  </script>
+</body>
+</html>
