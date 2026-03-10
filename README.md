@@ -2,6 +2,8 @@
 
 A comprehensive, production-grade Machine Learning pipeline system designed for customer churn prediction. This project demonstrates best practices in MLOps, including end-to-end automation, reproducibility, and scalable deployment using Docker, Airflow, MLflow, and AWS services.
 
+GitHub URL: https://github.com/p-sahas/customer_churn_prediction
+
 ## Features
 
 * **End-to-End Pipelines**: Automated data processing, model training, and inference pipelines.
